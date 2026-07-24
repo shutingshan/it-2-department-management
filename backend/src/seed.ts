@@ -52,7 +52,7 @@ export const DEPARTMENTS: Department[] = [
 interface SeedUser extends User {}
 
 export const USERS: SeedUser[] = [
-  { id: "u-admin", name: "系统管理员", pinyin: "xtgly", role: "admin", departmentId: "dept-it", avatarColor: "#2f54eb" },
+  { id: "u-admin", name: "单术婷", pinyin: "sst", role: "admin", departmentId: "dept-it", avatarColor: "#2f54eb" },
   { id: "u-czm", name: "陈志明", pinyin: "czm", role: "it_handler", departmentId: "dept-it", avatarColor: "#13a8a8" },
   { id: "u-ljy", name: "林嘉怡", pinyin: "ljy", role: "it_handler", departmentId: "dept-it", avatarColor: "#722ed1" },
   { id: "u-hjj", name: "黄俊杰", pinyin: "hjj", role: "it_handler", departmentId: "dept-it", avatarColor: "#eb2f96" },
