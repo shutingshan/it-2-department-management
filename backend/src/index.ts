@@ -1,6 +1,8 @@
 import express from "express";
 import cors from "cors";
 import morgan from "morgan";
+import path from "path";
+import fs from "fs";
 import authRouter from "./routes/auth";
 import ticketsRouter from "./routes/tickets";
 import syncRouter from "./routes/sync";
@@ -27,6 +29,15 @@ app.use("/api/logs", logsRouter);
 app.use("/api/export", exportRouter);
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
+
+// 生产环境下：把前端 `npm run build` 产物一并托管，避免额外部署 Nginx
+const frontendDist = path.join(__dirname, "../../frontend/dist");
+if (fs.existsSync(frontendDist)) {
+  app.use(express.static(frontendDist));
+  app.get(/^(?!\/api).*/, (_req, res) => {
+    res.sendFile(path.join(frontendDist, "index.html"));
+  });
+}
 
 app.listen(PORT, () => {
   console.log(`IT 二部工单中心系统 后端已启动: http://localhost:${PORT}`);
