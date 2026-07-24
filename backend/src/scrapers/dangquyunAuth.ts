@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { Browser, BrowserContext, chromium } from "playwright";
+import { Browser, BrowserContext, Page, chromium } from "playwright";
 import { config } from "../config";
 
 const AUTH_DIR = path.join(__dirname, "../../.auth");
@@ -10,6 +10,13 @@ const DEBUG_DIR = path.join(AUTH_DIR, "debug");
 function ensureDirs() {
   fs.mkdirSync(AUTH_DIR, { recursive: true });
   if (config.dangquyun.debug) fs.mkdirSync(DEBUG_DIR, { recursive: true });
+}
+
+// 很多现代网页有长期在跑的心跳请求/埋点/websocket，永远不会真正"网络空闲"，
+// 所以这里不等 networkidle，只等 DOM 就绪，再额外缓冲一小段时间给前端渲染/跳转
+async function gotoAndSettle(page: Page, url: string) {
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await page.waitForTimeout(2000);
 }
 
 async function dumpDebug(context: BrowserContext, label: string) {
@@ -23,7 +30,7 @@ async function dumpDebug(context: BrowserContext, label: string) {
     fs.writeFileSync(path.join(DEBUG_DIR, `${stamp}-${label}.html`), await page.content());
     console.log(`[dangquyun] 调试信息已保存: .auth/debug/${stamp}-${label}.{png,html}`);
   } catch (e) {
-    console.warn("[dangquyun] 保存调试信息失败", e);
+    console.warn(`[dangquyun] 保存调试信息失败（${label}）`, (e as Error).message);
   }
 }
 
@@ -42,7 +49,7 @@ async function performLogin(context: BrowserContext) {
   const loginUrl = config.dangquyun.loginUrl || config.dangquyun.targetUrl;
 
   console.log(`[dangquyun] 未检测到有效登录态，开始登录流程: ${loginUrl}`);
-  await page.goto(loginUrl, { waitUntil: "networkidle" });
+  await gotoAndSettle(page, loginUrl);
   await dumpDebug(context, "login-page-before-fill");
 
   // 尝试用较通用的方式定位账号/密码输入框和登录按钮；
@@ -97,7 +104,12 @@ async function performLogin(context: BrowserContext) {
     throw new Error("找不到登录按钮，请查看 backend/.auth/debug/ 下的截图和 HTML 调整选择器。");
   }
 
-  await page.waitForLoadState("networkidle").catch(() => {});
+  // 提交后页面可能整页跳转，也可能是前端路由跳转（不触发 load 事件），两种都等一下
+  await page
+    .waitForURL((url) => !/login|signin|sso/i.test(url.toString()), { timeout: 15000 })
+    .catch(() => {});
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await page.waitForTimeout(2000);
   await dumpDebug(context, "after-submit");
 
   if (await looksLikeLoginPage(context)) {
@@ -115,12 +127,12 @@ export async function getAuthenticatedContext(browser: Browser): Promise<Browser
   const context = await browser.newContext(hasState ? { storageState: STATE_PATH } : {});
   const page = await context.newPage();
 
-  await page.goto(config.dangquyun.targetUrl, { waitUntil: "networkidle" });
+  await gotoAndSettle(page, config.dangquyun.targetUrl);
 
   if (await looksLikeLoginPage(context)) {
     await performLogin(context);
     // 登录后重新跳转到目标页面
-    await page.goto(config.dangquyun.targetUrl, { waitUntil: "networkidle" });
+    await gotoAndSettle(page, config.dangquyun.targetUrl);
     if (await looksLikeLoginPage(context)) {
       await dumpDebug(context, "still-login-after-relogin");
       throw new Error("登录后仍无法进入目标页面，请检查账号密码或目标地址是否正确。");
