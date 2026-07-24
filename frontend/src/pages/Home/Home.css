@@ -1,0 +1,18 @@
+.progress-card {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  height: 200px;
+}
+
+.progress-item {
+  text-align: center;
+  cursor: pointer;
+}
+
+.progress-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: #2f54eb;
+  margin-top: 8px;
+}

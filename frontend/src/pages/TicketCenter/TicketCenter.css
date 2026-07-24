@@ -1,0 +1,113 @@
+.ticket-center-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: calc(100vh - 88px);
+}
+
+.tc-toolbar {
+  background: #fff;
+  padding: 12px 16px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.filter-bar {
+  background: #fff;
+  padding: 12px 16px;
+  border-radius: 8px;
+}
+
+.tc-table-card {
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px 16px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dev-yellow {
+  color: #d48806;
+  font-weight: 600;
+}
+
+.dev-red {
+  color: #cf1322;
+  font-weight: 600;
+}
+
+.floating-actions {
+  position: fixed;
+  right: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 50;
+}
+
+.floating-actions .ant-btn {
+  writing-mode: horizontal-tb;
+}
+
+.kanban-board {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  height: 100%;
+}
+
+.kanban-col {
+  flex: 0 0 260px;
+  background: #f7f8fa;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+}
+
+.kanban-col-header {
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #eee;
+}
+
+.kanban-count {
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.kanban-col-body {
+  padding: 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.kanban-card {
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+
+.kanban-card-title {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.kanban-card-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #8c8c8c;
+}
+
+.row-urgent {
+  background: #fff1f0;
+}
