@@ -104,12 +104,13 @@ async function performLogin(context: BrowserContext) {
     throw new Error("找不到登录按钮，请查看 backend/.auth/debug/ 下的截图和 HTML 调整选择器。");
   }
 
-  // 提交后页面可能整页跳转，也可能是前端路由跳转（不触发 load 事件），两种都等一下
-  await page
-    .waitForURL((url) => !/login|signin|sso/i.test(url.toString()), { timeout: 15000 })
-    .catch(() => {});
-  await page.waitForLoadState("domcontentloaded").catch(() => {});
-  await page.waitForTimeout(2000);
+  // 提交后按钮通常会有一小段"加载中"状态（接口请求进行中），不能按固定时间死等，
+  // 改成轮询：每隔 800ms 检查一次是否已经跳出登录页，最多等 20 秒
+  const pollDeadline = Date.now() + 20000;
+  while (Date.now() < pollDeadline) {
+    if (!(await looksLikeLoginPage(context))) break;
+    await page.waitForTimeout(800);
+  }
   await dumpDebug(context, "after-submit");
 
   if (await looksLikeLoginPage(context)) {
