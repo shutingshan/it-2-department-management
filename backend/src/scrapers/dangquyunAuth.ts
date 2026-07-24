@@ -133,5 +133,8 @@ export async function getAuthenticatedContext(browser: Browser): Promise<Browser
 }
 
 export async function launchBrowser(): Promise<Browser> {
-  return chromium.launch({ headless: !config.dangquyun.debug });
+  return chromium.launch({
+    headless: !config.dangquyun.debug,
+    channel: config.dangquyun.browserChannel,
+  });
 }

@@ -30,5 +30,12 @@ export const config = {
     get debug() {
       return process.env.DANGQUYUN_DEBUG === "true";
     },
+    // 复用本机已安装的 Chrome，省去单独下载 Playwright 自带 Chromium 的步骤；
+    // 服务器上如果没有装 Chrome，把 .env 里 DANGQUYUN_BROWSER_CHANNEL 留空即可回退到 Playwright 自带内核
+    get browserChannel(): "chrome" | undefined {
+      const v = process.env.DANGQUYUN_BROWSER_CHANNEL;
+      if (v === undefined) return "chrome";
+      return v === "" ? undefined : (v as "chrome");
+    },
   },
 };
