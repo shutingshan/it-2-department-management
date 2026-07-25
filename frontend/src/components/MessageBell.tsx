@@ -1,28 +1,38 @@
 import { useEffect, useState } from "react";
-import { Badge, Button, Dropdown, Empty, List, Tabs } from "antd";
+import { Badge, Button, Dropdown, Empty, List, Tabs, message as antdMessage } from "antd";
 import { BellOutlined } from "@ant-design/icons";
 import { api } from "../api/client";
 import type { InSiteMessage } from "../api/types";
+import { useAuthStore } from "../store/auth";
 
 export default function MessageBell() {
+  const { user } = useAuthStore();
   const [messages, setMessages] = useState<InSiteMessage[]>([]);
   const [tab, setTab] = useState<"unread" | "all">("unread");
   const [open, setOpen] = useState(false);
 
   async function load() {
-    const res = await api.get("/messages");
+    if (!user) return;
+    const res = await api.get("/messages", { params: { actor: user.name, actorRole: user.role } });
     setMessages(res.data.data);
   }
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const unread = messages.filter((m) => !m.read);
   const list = tab === "unread" ? unread : messages;
+  const isAdmin = user?.role === "admin";
 
   async function markRead(id: string) {
-    await api.patch(`/messages/${id}/read`);
+    if (!user) return;
+    if (isAdmin) {
+      antdMessage.warning("管理员可查看全部站内信，但不能代替他人标记为已读");
+      return;
+    }
+    await api.patch(`/messages/${id}/read`, { actor: user.name, actorRole: user.role });
     load();
   }
 
@@ -45,7 +55,11 @@ export default function MessageBell() {
             dataSource={list}
             renderItem={(m) => (
               <List.Item
-                style={{ cursor: "pointer", opacity: m.read ? 0.55 : 1, padding: "10px 8px" }}
+                style={{
+                  cursor: isAdmin ? "not-allowed" : "pointer",
+                  opacity: m.read ? 0.55 : 1,
+                  padding: "10px 8px",
+                }}
                 onClick={() => markRead(m.id)}
               >
                 <div style={{ width: "100%" }}>
@@ -53,7 +67,7 @@ export default function MessageBell() {
                     <b>{m.requesterName}</b> {m.action}
                   </div>
                   <div style={{ fontSize: 12, color: "#8c8c8c", marginTop: 2 }}>
-                    工单编号：{m.ticketCode} · {m.time}
+                    工单编号：{m.ticketCode} · IT受理人：{m.itHandler} · {m.time}
                   </div>
                 </div>
               </List.Item>

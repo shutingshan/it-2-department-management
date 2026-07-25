@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   Modal,
@@ -26,6 +26,7 @@ import { api } from "../../api/client";
 import { hoursDeviation, STAGE_COLORS } from "../../api/types";
 import type { Ticket } from "../../api/types";
 import { useAuthStore } from "../../store/auth";
+import { useFilteredTicketsStore } from "../../store/filteredTickets";
 import { useTickets } from "./useTickets";
 import type { TicketFilters } from "./useTickets";
 import FilterBar from "./FilterBar";
@@ -51,6 +52,20 @@ export default function TicketCenter() {
   const [exportOpen, setExportOpen] = useState(false);
   const [batchTransferOpen, setBatchTransferOpen] = useState(false);
   const [localRefresh, setLocalRefresh] = useState(0);
+
+  // 支持从头部"我负责的工单"等入口重复导航到 /tickets 时，也能重新应用筛选条件
+  useEffect(() => {
+    if (location.state) {
+      setFilters((f) => ({ ...f, ...(location.state as TicketFilters) }));
+      setPage(1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
+
+  const { setFilters: publishFilters } = useFilteredTicketsStore();
+  useEffect(() => {
+    publishFilters(filters);
+  }, [filters, publishFilters]);
 
   const { data, total, facets, loading, reload } = useTickets(
     filters,

@@ -87,6 +87,7 @@ router.patch("/:id", (req, res) => {
   if (actorRole === "requester" && changeEntries.length) {
     store.addMessage({
       toRole: "admin",
+      itHandler: ticket.itHandler,
       requesterName: actor,
       action: `更新了工单「${ticket.title}」的 ${changeEntries.map((c) => c.field).join("、")} 字段`,
       time: dayjs().format("YYYY-MM-DD HH:mm"),

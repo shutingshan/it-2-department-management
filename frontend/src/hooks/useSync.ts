@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import type { SyncJob } from "../api/types";
 import { useAuthStore } from "../store/auth";
 import { ROLE_LABELS } from "../api/types";
+import type { TicketFilters } from "../pages/TicketCenter/useTickets";
 
 export function useSync(onRefresh?: () => void) {
   const { user } = useAuthStore();
@@ -40,7 +41,7 @@ export function useSync(onRefresh?: () => void) {
     return () => stopPoll();
   }, [stopPoll]);
 
-  async function fetchNew() {
+  async function fetchNew(mode: "incremental" | "full" = "incremental") {
     if (!user) return;
     setBusy(true);
     setError(null);
@@ -48,7 +49,7 @@ export function useSync(onRefresh?: () => void) {
       // 真实抓取当曲云需要打开浏览器、登录、翻页拉全量数据，可能耗时几分钟，单独放宽超时
       const res = await api.post(
         "/sync/fetch-new",
-        { actor: user.name },
+        { actor: user.name, mode },
         { timeout: 300000 }
       );
       onRefresh?.();
@@ -61,31 +62,39 @@ export function useSync(onRefresh?: () => void) {
     }
   }
 
-  async function updateTickets() {
+  async function updateTickets(filters?: TicketFilters) {
     if (!user) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await api.post("/sync/update-tickets", { actor: user.name, actorRole: user.role });
+      const res = await api.post("/sync/update-tickets", {
+        actor: user.name,
+        actorRole: user.role,
+        filters,
+      });
       setJob(res.data.job);
       poll(() => {
         onRefresh?.();
       });
     } catch (e: any) {
       setError(e?.response?.data?.message ?? "更新工单失败");
+      throw e;
     } finally {
       setBusy(false);
     }
   }
 
-  async function syncTapd() {
+  async function syncTapd(filters?: TicketFilters) {
     if (!user) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await api.post("/sync/tapd", { actor: user.name });
+      const res = await api.post("/sync/tapd", { actor: user.name, filters });
       setJob(res.data.job);
       poll(() => onRefresh?.());
+    } catch (e: any) {
+      setError(e?.response?.data?.message ?? "获取 TAPD 信息失败");
+      throw e;
     } finally {
       setBusy(false);
     }

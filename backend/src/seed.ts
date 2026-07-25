@@ -313,6 +313,7 @@ export function generateMessages(tickets: Ticket[]): InSiteMessage[] {
     msgs.push({
       id: uuid(),
       toRole: "admin",
+      itHandler: t.itHandler,
       requesterName: t.requester,
       action: `更新了工单「${t.title}」的紧急字段`,
       time: dayjs(t.submittedAt).add(1, "hour").format("YYYY-MM-DD HH:mm"),
