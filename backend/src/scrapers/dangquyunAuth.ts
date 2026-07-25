@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 import fs from "fs";
 import path from "path";
 import { Browser, BrowserContext, Page, chromium } from "playwright";
@@ -13,10 +14,19 @@ function ensureDirs() {
 }
 
 // 很多现代网页有长期在跑的心跳请求/埋点/websocket，永远不会真正"网络空闲"，
-// 所以这里不等 networkidle，只等 DOM 就绪，再额外缓冲一小段时间给前端渲染/跳转
+// 所以这里不等 networkidle，只等 DOM 就绪；低代码平台这类页面首次渲染往往还要
+// 异步拉取页面配置/数据，因此不用固定延时，而是轮询等到页面上真的出现可见文字为止
 async function gotoAndSettle(page: Page, url: string) {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
-  await page.waitForTimeout(2000);
+
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    const text = await page.evaluate(() => document.body?.innerText?.trim().length ?? 0);
+    if (text > 0) break;
+    await page.waitForTimeout(500);
+  }
+  // 内容出现后再留一点缓冲，等表格这类组件把行渲染完
+  await page.waitForTimeout(1500);
 }
 
 async function dumpDebug(context: BrowserContext, label: string) {
