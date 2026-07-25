@@ -44,7 +44,7 @@ router.post("/fetch-new", async (req, res) => {
       actor,
       success: true,
       failReason: null,
-      detail: `本次抓取 ${result.rows.length} 条（策略：${result.strategy}），增量获取新工单 ${newTickets.length} 条`,
+      detail: `本次抓取 ${result.pageCount} 页共 ${result.rows.length} 条（策略：${result.strategy}），增量获取新工单 ${newTickets.length} 条`,
     });
     res.json({ addedCount: newTickets.length });
   } catch (e) {
