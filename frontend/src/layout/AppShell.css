@@ -1,5 +1,6 @@
 .app-sider {
-  background: linear-gradient(180deg, #1a2a63 0%, #26348a 100%) !important;
+  background: linear-gradient(180deg, #eef2ff 0%, #fdf2f8 55%, #fff7ed 100%) !important;
+  border-right: 1px solid rgba(17, 24, 39, 0.06);
 }
 
 .app-logo {
@@ -8,8 +9,8 @@
   align-items: center;
   gap: 8px;
   padding: 0 16px;
-  color: #fff;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  color: #111827;
+  border-bottom: 1px solid rgba(17, 24, 39, 0.06);
 }
 
 .app-logo-badge {
@@ -17,6 +18,7 @@
   height: 26px;
   border-radius: 6px;
   background: #2f54eb;
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -32,22 +34,27 @@
   text-overflow: ellipsis;
 }
 
+.app-sider .ant-menu-light {
+  background: transparent;
+}
+
 .app-header {
-  background: linear-gradient(90deg, #1a2a63 0%, #2f54eb 160%);
+  background: linear-gradient(90deg, #eef2ff 0%, #fdf2f8 55%, #fff7ed 100%);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
   height: 56px;
   line-height: 56px;
+  border-bottom: 1px solid rgba(17, 24, 39, 0.06);
 }
 
 .app-header-right :where(.ant-typography) {
-  color: #fff;
+  color: #111827;
 }
 
 .app-header-right .ant-btn {
-  color: #fff;
+  color: #111827;
 }
 
 .app-content {
