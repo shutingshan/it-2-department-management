@@ -52,13 +52,13 @@ export default function AppShell() {
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
-      <Sider theme="dark" width={188} className="app-sider">
+      <Sider theme="light" width={188} className="app-sider">
         <div className="app-logo">
           <span className="app-logo-badge">IT</span>
           <span className="app-logo-text">二部工单中心</span>
         </div>
         <Menu
-          theme="dark"
+          theme="light"
           mode="inline"
           selectedKeys={[activeKey]}
           items={MENU_ITEMS}

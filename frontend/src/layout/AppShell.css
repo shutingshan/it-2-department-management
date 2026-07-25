@@ -1,5 +1,6 @@
 .app-sider {
-  background: #0b1e3c !important;
+  background: linear-gradient(180deg, #eef2ff 0%, #fdf2f8 55%, #fff7ed 100%) !important;
+  border-right: 1px solid rgba(17, 24, 39, 0.06);
 }
 
 .app-logo {
@@ -8,8 +9,8 @@
   align-items: center;
   gap: 8px;
   padding: 0 16px;
-  color: #fff;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: #111827;
+  border-bottom: 1px solid rgba(17, 24, 39, 0.06);
 }
 
 .app-logo-badge {
@@ -17,6 +18,7 @@
   height: 26px;
   border-radius: 6px;
   background: #2f54eb;
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -32,26 +34,31 @@
   text-overflow: ellipsis;
 }
 
+.app-sider .ant-menu-light {
+  background: transparent;
+}
+
 .app-header {
-  background: #0b1e3c;
+  background: linear-gradient(90deg, #eef2ff 0%, #fdf2f8 55%, #fff7ed 100%);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
   height: 56px;
   line-height: 56px;
+  border-bottom: 1px solid rgba(17, 24, 39, 0.06);
 }
 
 .app-header-right :where(.ant-typography) {
-  color: #fff;
+  color: #111827;
 }
 
 .app-header-right .ant-btn {
-  color: #fff;
+  color: #111827;
 }
 
 .app-content {
-  background: #f0f2f5;
+  background: linear-gradient(135deg, #f3f5ff 0%, #fbf3f8 55%, #fffaf3 100%);
   padding: 16px;
   overflow: auto;
 }
@@ -74,5 +81,5 @@
 }
 
 .switch-user-item:hover {
-  background: #f5f5f5;
+  background: #f0f2ff;
 }
