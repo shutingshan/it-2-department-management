@@ -11,7 +11,7 @@ export interface ScrapedRow {
 
 export interface ScrapeResult {
   rows: ScrapedRow[];
-  strategy: "native-table" | "aria-grid" | "none";
+  strategy: "dangqu-grid" | "native-table" | "aria-grid" | "none";
 }
 
 type Locatable = Page | Frame;
@@ -37,6 +37,30 @@ async function waitForSpinnersToFinish(targets: Locatable[], timeoutMs = 45000) 
     await new Promise((r) => setTimeout(r, 800));
   }
   console.warn("[dangquyun] 等待加载中转圈消失超时，仍尝试继续抓取（可能数据本来就没加载出来）");
+}
+
+// 当曲云（lumi 自研表格组件）的实际结构：既不是原生 table，也没有标准 ARIA role，
+// 而是每一行用 data-row-item="true" 标记、每个单元格用 data-columnitem 标记；
+// class 名带编译哈希（如 columnItemHeaderTitle___3CMa-）会变，属性选择器更稳定
+async function extractFromDangquyunGrid(target: Locatable): Promise<ScrapedRow[] | null> {
+  const rowLocator = target.locator('[data-row-item="true"]');
+  const rowCount = await rowLocator.count();
+  if (rowCount === 0) return null;
+
+  const headers = await target.locator('[class*="columnItemHeaderTitle"] [class*="titleSpanTitle"]').allTextContents();
+
+  const rows: ScrapedRow[] = [];
+  for (let i = 0; i < rowCount; i++) {
+    const cells = await rowLocator.nth(i).locator("[data-columnitem]").allTextContents();
+    if (cells.length === 0) continue;
+    const row: ScrapedRow = {};
+    cells.forEach((c, idx) => {
+      const key = headers[idx]?.trim() || `col${idx}`;
+      row[key] = c.trim();
+    });
+    rows.push(row);
+  }
+  return rows.length > 0 ? rows : null;
 }
 
 // 原生 <table> 结构提取
@@ -97,6 +121,13 @@ export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
     const targets: Locatable[] = [page, ...page.frames()];
 
     await waitForSpinnersToFinish(targets);
+
+    for (const target of targets) {
+      const dangquyunRows = await extractFromDangquyunGrid(target).catch(() => null);
+      if (dangquyunRows) {
+        return { rows: dangquyunRows, strategy: "dangqu-grid" };
+      }
+    }
 
     for (const target of targets) {
       const nativeRows = await extractFromNativeTable(target).catch(() => null);
