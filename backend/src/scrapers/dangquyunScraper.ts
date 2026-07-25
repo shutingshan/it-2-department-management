@@ -92,10 +92,12 @@ export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
     const stamp = Date.now();
     await page.screenshot({ path: path.join(DEBUG_DIR, `${stamp}-no-table-found.png`), fullPage: true });
     fs.writeFileSync(path.join(DEBUG_DIR, `${stamp}-no-table-found.html`), await page.content());
-    for (let i = 0; i < page.frames().length; i++) {
+    // page.frames() 第一个是主页面本身，从第二个开始才是真正嵌套的子 iframe
+    const childFrameCount = page.frames().length - 1;
+    for (let i = 1; i < page.frames().length; i++) {
       try {
         fs.writeFileSync(
-          path.join(DEBUG_DIR, `${stamp}-no-table-found-frame${i}.html`),
+          path.join(DEBUG_DIR, `${stamp}-no-table-found-childframe${i}.html`),
           await page.frames()[i].content()
         );
       } catch {
@@ -103,7 +105,7 @@ export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
       }
     }
     console.warn(
-      `[dangquyun] 未能用通用规则识别出表格结构（已包含 ${page.frames().length} 个 iframe），` +
+      `[dangquyun] 未能用通用规则识别出表格结构（${childFrameCount > 0 ? `含 ${childFrameCount} 个子 iframe` : "页面本身没有子 iframe"}），` +
         `已保存截图/HTML 到 backend/.auth/debug/${stamp}-no-table-found.*，请把这些文件发回来，我再针对实际页面结构调整抓取选择器。`
     );
     return { rows: [], strategy: "none" };
