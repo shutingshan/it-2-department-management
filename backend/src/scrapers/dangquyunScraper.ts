@@ -16,6 +16,29 @@ export interface ScrapeResult {
 
 type Locatable = Page | Frame;
 
+// 当曲云基于 antd 组件库，表格数据是异步加载的：外壳（左侧菜单、顶部标签）先渲染出来，
+// 真正的工单列表在请求完成前会一直显示 antd 的加载中转圈（class 带 spin-spinning），
+// 不能只看页面有没有文字（菜单文字一直都在），要专门等这个转圈状态消失
+async function waitForSpinnersToFinish(targets: Locatable[], timeoutMs = 45000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let anySpinning = false;
+    for (const target of targets) {
+      const count = await target
+        .locator('[class*="spin-spinning"]')
+        .count()
+        .catch(() => 0);
+      if (count > 0) {
+        anySpinning = true;
+        break;
+      }
+    }
+    if (!anySpinning) return;
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  console.warn("[dangquyun] 等待加载中转圈消失超时，仍尝试继续抓取（可能数据本来就没加载出来）");
+}
+
 // 原生 <table> 结构提取
 async function extractFromNativeTable(target: Locatable): Promise<ScrapedRow[] | null> {
   const table = target.locator("table").first();
@@ -72,6 +95,8 @@ export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
     // 很多低代码平台把实际业务内容渲染在 iframe 里，主页面本身可能只是个空壳，
     // 所以要连同页面里所有 iframe 一起找，而不只是主页面
     const targets: Locatable[] = [page, ...page.frames()];
+
+    await waitForSpinnersToFinish(targets);
 
     for (const target of targets) {
       const nativeRows = await extractFromNativeTable(target).catch(() => null);
