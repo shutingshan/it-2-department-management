@@ -21,8 +21,12 @@ async function gotoAndSettle(page: Page, url: string) {
 
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
-    const text = await page.evaluate(() => document.body?.innerText?.trim().length ?? 0);
-    if (text > 0) break;
+    try {
+      const text = await page.evaluate(() => document.body?.innerText?.trim().length ?? 0);
+      if (text > 0) break;
+    } catch {
+      // 页面这期间又发生了一次内部跳转/刷新，执行上下文失效，当作"还没准备好"继续等
+    }
     await page.waitForTimeout(500);
   }
   // 内容出现后再留一点缓冲，等表格这类组件把行渲染完
