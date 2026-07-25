@@ -14,13 +14,14 @@ function ensureDirs() {
 }
 
 // 很多现代网页有长期在跑的心跳请求/埋点/websocket，永远不会真正"网络空闲"，
-// 所以这里不等 networkidle，只等 DOM 就绪；低代码平台这类页面首次渲染往往还要
-// 异步拉取页面配置/数据，因此不用固定延时，而是轮询等到页面（或页面内任意一个 iframe，
-// 很多低代码平台把实际业务内容渲染在 iframe 里）上真的出现可见文字为止
+// 所以这里不等 networkidle，只等 DOM 就绪。当曲云是基于 Next.js + Module Federation
+// 的微前端架构（首屏要加载几十个 JS chunk 再渲染进 #__next），首次渲染明显慢于普通网页，
+// 因此不用固定延时，而是轮询等到页面（或内嵌的子 frame，如果真的有的话）上出现可见文字为止，
+// 并把整体超时放宽到 60 秒
 async function gotoAndSettle(page: Page, url: string) {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
 
-  const deadline = Date.now() + 15000;
+  const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
     try {
       for (const frame of page.frames()) {
@@ -35,7 +36,7 @@ async function gotoAndSettle(page: Page, url: string) {
     } catch {
       // 页面这期间又发生了一次内部跳转/刷新，执行上下文失效，当作"还没准备好"继续等
     }
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(800);
   }
 }
 
@@ -48,17 +49,19 @@ async function dumpDebug(context: BrowserContext, label: string) {
   try {
     await page.screenshot({ path: path.join(DEBUG_DIR, `${stamp}-${label}.png`), fullPage: true });
     fs.writeFileSync(path.join(DEBUG_DIR, `${stamp}-${label}.html`), await page.content());
-    // 主页面 HTML 只能看到 <iframe src="..."> 这层壳，实际内容要看每个 frame 各自的 HTML
+    // page.frames() 里第一个就是主页面本身，后面才是真正嵌套的子 iframe（如果有的话）；
+    // 如果确实有子 iframe，主页面 HTML 只能看到 <iframe src="..."> 这层壳，要看子 frame 各自的 HTML
     const frames = page.frames();
-    for (let i = 0; i < frames.length; i++) {
+    for (let i = 1; i < frames.length; i++) {
       try {
-        fs.writeFileSync(path.join(DEBUG_DIR, `${stamp}-${label}-frame${i}.html`), await frames[i].content());
+        fs.writeFileSync(path.join(DEBUG_DIR, `${stamp}-${label}-childframe${i}.html`), await frames[i].content());
       } catch {
         // 跨域 iframe 等场景可能拿不到内容，跳过
       }
     }
     console.log(
-      `[dangquyun] 调试信息已保存: .auth/debug/${stamp}-${label}.{png,html}（另有 ${frames.length} 个 frame 的 HTML）`
+      `[dangquyun] 调试信息已保存: .auth/debug/${stamp}-${label}.{png,html}` +
+        (frames.length > 1 ? `（另有 ${frames.length - 1} 个子 iframe 的 HTML）` : "（页面本身没有子 iframe）")
     );
   } catch (e) {
     console.warn(`[dangquyun] 保存调试信息失败（${label}）`, (e as Error).message);
