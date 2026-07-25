@@ -1,7 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { Page } from "playwright";
-import { config } from "../config";
+import { Frame, Page } from "playwright";
 import { getAuthenticatedContext, launchBrowser } from "./dangquyunAuth";
 
 const DEBUG_DIR = path.join(__dirname, "../../.auth/debug");
@@ -15,9 +14,11 @@ export interface ScrapeResult {
   strategy: "native-table" | "aria-grid" | "none";
 }
 
+type Locatable = Page | Frame;
+
 // 原生 <table> 结构提取
-async function extractFromNativeTable(page: Page): Promise<ScrapedRow[] | null> {
-  const table = page.locator("table").first();
+async function extractFromNativeTable(target: Locatable): Promise<ScrapedRow[] | null> {
+  const table = target.locator("table").first();
   if ((await table.count()) === 0) return null;
 
   const headers = await table.locator("thead th").allTextContents();
@@ -38,13 +39,13 @@ async function extractFromNativeTable(page: Page): Promise<ScrapedRow[] | null> 
 }
 
 // 很多现代表格组件（antd 等）用 div + ARIA role 模拟表格，而非原生 <table>
-async function extractFromAriaGrid(page: Page): Promise<ScrapedRow[] | null> {
-  const headerCells = page.locator('[role="columnheader"]');
+async function extractFromAriaGrid(target: Locatable): Promise<ScrapedRow[] | null> {
+  const headerCells = target.locator('[role="columnheader"]');
   const headerCount = await headerCells.count();
   if (headerCount === 0) return null;
   const headers = await headerCells.allTextContents();
 
-  const rowLocator = page.locator('[role="row"]');
+  const rowLocator = target.locator('[role="row"]');
   const rowCount = await rowLocator.count();
   const rows: ScrapedRow[] = [];
   for (let i = 0; i < rowCount; i++) {
@@ -68,24 +69,42 @@ export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
     const context = await getAuthenticatedContext(browser);
     const page = context.pages()[0] ?? (await context.newPage());
 
-    const nativeRows = await extractFromNativeTable(page);
-    if (nativeRows) {
-      return { rows: nativeRows, strategy: "native-table" };
+    // 很多低代码平台把实际业务内容渲染在 iframe 里，主页面本身可能只是个空壳，
+    // 所以要连同页面里所有 iframe 一起找，而不只是主页面
+    const targets: Locatable[] = [page, ...page.frames()];
+
+    for (const target of targets) {
+      const nativeRows = await extractFromNativeTable(target).catch(() => null);
+      if (nativeRows) {
+        return { rows: nativeRows, strategy: "native-table" };
+      }
     }
 
-    const ariaRows = await extractFromAriaGrid(page);
-    if (ariaRows) {
-      return { rows: ariaRows, strategy: "aria-grid" };
+    for (const target of targets) {
+      const ariaRows = await extractFromAriaGrid(target).catch(() => null);
+      if (ariaRows) {
+        return { rows: ariaRows, strategy: "aria-grid" };
+      }
     }
 
-    // 两种常见结构都没找到数据：保存现场，方便针对实际页面结构调整选择器
+    // 两种常见结构在主页面和所有 iframe 里都没找到：保存现场，方便针对实际页面结构调整选择器
     fs.mkdirSync(DEBUG_DIR, { recursive: true });
     const stamp = Date.now();
     await page.screenshot({ path: path.join(DEBUG_DIR, `${stamp}-no-table-found.png`), fullPage: true });
     fs.writeFileSync(path.join(DEBUG_DIR, `${stamp}-no-table-found.html`), await page.content());
+    for (let i = 0; i < page.frames().length; i++) {
+      try {
+        fs.writeFileSync(
+          path.join(DEBUG_DIR, `${stamp}-no-table-found-frame${i}.html`),
+          await page.frames()[i].content()
+        );
+      } catch {
+        // 跨域 iframe 等场景可能拿不到内容，跳过
+      }
+    }
     console.warn(
-      `[dangquyun] 未能用通用规则识别出表格结构，已保存截图/HTML 到 backend/.auth/debug/${stamp}-no-table-found.*，` +
-        "请把这两个文件发回来，我再针对实际页面结构调整抓取选择器。"
+      `[dangquyun] 未能用通用规则识别出表格结构（已包含 ${page.frames().length} 个 iframe），` +
+        `已保存截图/HTML 到 backend/.auth/debug/${stamp}-no-table-found.*，请把这些文件发回来，我再针对实际页面结构调整抓取选择器。`
     );
     return { rows: [], strategy: "none" };
   } finally {

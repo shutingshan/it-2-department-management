@@ -15,22 +15,28 @@ function ensureDirs() {
 
 // 很多现代网页有长期在跑的心跳请求/埋点/websocket，永远不会真正"网络空闲"，
 // 所以这里不等 networkidle，只等 DOM 就绪；低代码平台这类页面首次渲染往往还要
-// 异步拉取页面配置/数据，因此不用固定延时，而是轮询等到页面上真的出现可见文字为止
+// 异步拉取页面配置/数据，因此不用固定延时，而是轮询等到页面（或页面内任意一个 iframe，
+// 很多低代码平台把实际业务内容渲染在 iframe 里）上真的出现可见文字为止
 async function gotoAndSettle(page: Page, url: string) {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
 
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
     try {
-      const text = await page.evaluate(() => document.body?.innerText?.trim().length ?? 0);
-      if (text > 0) break;
+      for (const frame of page.frames()) {
+        const text = await frame
+          .evaluate(() => document.body?.innerText?.trim().length ?? 0)
+          .catch(() => 0);
+        if (text > 0) {
+          await page.waitForTimeout(1500);
+          return;
+        }
+      }
     } catch {
       // 页面这期间又发生了一次内部跳转/刷新，执行上下文失效，当作"还没准备好"继续等
     }
     await page.waitForTimeout(500);
   }
-  // 内容出现后再留一点缓冲，等表格这类组件把行渲染完
-  await page.waitForTimeout(1500);
 }
 
 async function dumpDebug(context: BrowserContext, label: string) {
@@ -42,7 +48,18 @@ async function dumpDebug(context: BrowserContext, label: string) {
   try {
     await page.screenshot({ path: path.join(DEBUG_DIR, `${stamp}-${label}.png`), fullPage: true });
     fs.writeFileSync(path.join(DEBUG_DIR, `${stamp}-${label}.html`), await page.content());
-    console.log(`[dangquyun] 调试信息已保存: .auth/debug/${stamp}-${label}.{png,html}`);
+    // 主页面 HTML 只能看到 <iframe src="..."> 这层壳，实际内容要看每个 frame 各自的 HTML
+    const frames = page.frames();
+    for (let i = 0; i < frames.length; i++) {
+      try {
+        fs.writeFileSync(path.join(DEBUG_DIR, `${stamp}-${label}-frame${i}.html`), await frames[i].content());
+      } catch {
+        // 跨域 iframe 等场景可能拿不到内容，跳过
+      }
+    }
+    console.log(
+      `[dangquyun] 调试信息已保存: .auth/debug/${stamp}-${label}.{png,html}（另有 ${frames.length} 个 frame 的 HTML）`
+    );
   } catch (e) {
     console.warn(`[dangquyun] 保存调试信息失败（${label}）`, (e as Error).message);
   }
