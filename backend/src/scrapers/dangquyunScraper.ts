@@ -4,14 +4,18 @@ import { Frame, Page } from "playwright";
 import { getAuthenticatedContext, launchBrowser } from "./dangquyunAuth";
 
 const DEBUG_DIR = path.join(__dirname, "../../.auth/debug");
+const MAX_PAGES = 60; // 安全上限，防止分页逻辑出问题时无限翻页
 
 export interface ScrapedRow {
   [columnHeader: string]: string;
 }
 
+export type ExtractStrategy = "dangqu-grid" | "native-table" | "aria-grid";
+
 export interface ScrapeResult {
   rows: ScrapedRow[];
-  strategy: "dangqu-grid" | "native-table" | "aria-grid" | "none";
+  strategy: ExtractStrategy | "none";
+  pageCount: number;
 }
 
 type Locatable = Page | Frame;
@@ -110,6 +114,51 @@ async function extractFromAriaGrid(target: Locatable): Promise<ScrapedRow[] | nu
   return rows.length > 0 ? rows : null;
 }
 
+async function extractCurrentPage(
+  targets: Locatable[]
+): Promise<{ rows: ScrapedRow[]; strategy: ExtractStrategy } | null> {
+  for (const target of targets) {
+    const rows = await extractFromDangquyunGrid(target).catch(() => null);
+    if (rows) return { rows, strategy: "dangqu-grid" };
+  }
+  for (const target of targets) {
+    const rows = await extractFromNativeTable(target).catch(() => null);
+    if (rows) return { rows, strategy: "native-table" };
+  }
+  for (const target of targets) {
+    const rows = await extractFromAriaGrid(target).catch(() => null);
+    if (rows) return { rows, strategy: "aria-grid" };
+  }
+  return null;
+}
+
+// 标准 antd 分页组件：下一页按钮 class 含 ant-pagination-next，
+// 到最后一页时会带 ant-pagination-disabled class 且 aria-disabled="true"
+async function goToNextPage(targets: Locatable[]): Promise<boolean> {
+  for (const target of targets) {
+    const nextBtn = target.locator(".ant-pagination-next");
+    if ((await nextBtn.count()) === 0) continue;
+    const disabled = await nextBtn.first().getAttribute("aria-disabled");
+    const classAttr = (await nextBtn.first().getAttribute("class")) ?? "";
+    if (disabled === "true" || classAttr.includes("ant-pagination-disabled")) {
+      return false;
+    }
+    await nextBtn.first().click();
+    return true;
+  }
+  return false;
+}
+
+function dedupeByCode(allRows: ScrapedRow[]): ScrapedRow[] {
+  const map = new Map<string, ScrapedRow>();
+  for (const row of allRows) {
+    const code = row["编号"]?.trim();
+    if (!code) continue;
+    map.set(code, row); // 同编号后出现的覆盖前面的，理论上不应该出现，兜底而已
+  }
+  return Array.from(map.values());
+}
+
 export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
   const browser = await launchBrowser();
   try {
@@ -122,49 +171,50 @@ export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
 
     await waitForSpinnersToFinish(targets);
 
-    for (const target of targets) {
-      const dangquyunRows = await extractFromDangquyunGrid(target).catch(() => null);
-      if (dangquyunRows) {
-        return { rows: dangquyunRows, strategy: "dangqu-grid" };
+    const firstPage = await extractCurrentPage(targets);
+    if (!firstPage) {
+      // 三种常见结构在主页面和所有 iframe 里都没找到：保存现场，方便针对实际页面结构调整选择器
+      fs.mkdirSync(DEBUG_DIR, { recursive: true });
+      const stamp = Date.now();
+      await page.screenshot({ path: path.join(DEBUG_DIR, `${stamp}-no-table-found.png`), fullPage: true });
+      fs.writeFileSync(path.join(DEBUG_DIR, `${stamp}-no-table-found.html`), await page.content());
+      const childFrameCount = page.frames().length - 1;
+      for (let i = 1; i < page.frames().length; i++) {
+        try {
+          fs.writeFileSync(
+            path.join(DEBUG_DIR, `${stamp}-no-table-found-childframe${i}.html`),
+            await page.frames()[i].content()
+          );
+        } catch {
+          // 跨域 iframe 等场景可能拿不到内容，跳过
+        }
       }
+      console.warn(
+        `[dangquyun] 未能用通用规则识别出表格结构（${childFrameCount > 0 ? `含 ${childFrameCount} 个子 iframe` : "页面本身没有子 iframe"}），` +
+          `已保存截图/HTML 到 backend/.auth/debug/${stamp}-no-table-found.*，请把这些文件发回来，我再针对实际页面结构调整抓取选择器。`
+      );
+      return { rows: [], strategy: "none", pageCount: 0 };
     }
 
-    for (const target of targets) {
-      const nativeRows = await extractFromNativeTable(target).catch(() => null);
-      if (nativeRows) {
-        return { rows: nativeRows, strategy: "native-table" };
-      }
+    const allRows: ScrapedRow[] = [...firstPage.rows];
+    let pageCount = 1;
+
+    while (pageCount < MAX_PAGES) {
+      const moved = await goToNextPage(targets);
+      if (!moved) break;
+
+      await waitForSpinnersToFinish(targets);
+      const next = await extractCurrentPage(targets);
+      if (!next || next.rows.length === 0) break; // 翻页后抓不到数据了，停止，避免死循环
+      allRows.push(...next.rows);
+      pageCount += 1;
     }
 
-    for (const target of targets) {
-      const ariaRows = await extractFromAriaGrid(target).catch(() => null);
-      if (ariaRows) {
-        return { rows: ariaRows, strategy: "aria-grid" };
-      }
+    if (pageCount >= MAX_PAGES) {
+      console.warn(`[dangquyun] 翻页已达到安全上限 ${MAX_PAGES} 页，提前停止（可能实际页数更多）`);
     }
 
-    // 两种常见结构在主页面和所有 iframe 里都没找到：保存现场，方便针对实际页面结构调整选择器
-    fs.mkdirSync(DEBUG_DIR, { recursive: true });
-    const stamp = Date.now();
-    await page.screenshot({ path: path.join(DEBUG_DIR, `${stamp}-no-table-found.png`), fullPage: true });
-    fs.writeFileSync(path.join(DEBUG_DIR, `${stamp}-no-table-found.html`), await page.content());
-    // page.frames() 第一个是主页面本身，从第二个开始才是真正嵌套的子 iframe
-    const childFrameCount = page.frames().length - 1;
-    for (let i = 1; i < page.frames().length; i++) {
-      try {
-        fs.writeFileSync(
-          path.join(DEBUG_DIR, `${stamp}-no-table-found-childframe${i}.html`),
-          await page.frames()[i].content()
-        );
-      } catch {
-        // 跨域 iframe 等场景可能拿不到内容，跳过
-      }
-    }
-    console.warn(
-      `[dangquyun] 未能用通用规则识别出表格结构（${childFrameCount > 0 ? `含 ${childFrameCount} 个子 iframe` : "页面本身没有子 iframe"}），` +
-        `已保存截图/HTML 到 backend/.auth/debug/${stamp}-no-table-found.*，请把这些文件发回来，我再针对实际页面结构调整抓取选择器。`
-    );
-    return { rows: [], strategy: "none" };
+    return { rows: dedupeByCode(allRows), strategy: firstPage.strategy, pageCount };
   } finally {
     await browser.close();
   }

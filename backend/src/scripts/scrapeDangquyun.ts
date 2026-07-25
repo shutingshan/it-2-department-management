@@ -5,7 +5,7 @@ import { scrapeDangquyunTicketList } from "../scrapers/dangquyunScraper";
 async function main() {
   console.log("[dangquyun] 开始抓取...");
   const result = await scrapeDangquyunTicketList();
-  console.log(`[dangquyun] 抓取策略: ${result.strategy}，共 ${result.rows.length} 行`);
+  console.log(`[dangquyun] 抓取策略: ${result.strategy}，共翻 ${result.pageCount} 页，共 ${result.rows.length} 行`);
 
   const outPath = path.join(__dirname, "../../.auth/latest-scrape.json");
   fs.mkdirSync(path.dirname(outPath), { recursive: true });

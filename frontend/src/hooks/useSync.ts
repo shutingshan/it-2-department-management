@@ -45,11 +45,11 @@ export function useSync(onRefresh?: () => void) {
     setBusy(true);
     setError(null);
     try {
-      // 真实抓取当曲云需要打开浏览器、登录、等待页面渲染，可能耗时几十秒，单独放宽超时
+      // 真实抓取当曲云需要打开浏览器、登录、翻页拉全量数据，可能耗时几分钟，单独放宽超时
       const res = await api.post(
         "/sync/fetch-new",
         { actor: user.name },
-        { timeout: 120000 }
+        { timeout: 300000 }
       );
       onRefresh?.();
       return res.data.addedCount as number;
