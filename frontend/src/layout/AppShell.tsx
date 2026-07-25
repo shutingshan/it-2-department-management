@@ -37,9 +37,10 @@ export default function AppShell() {
 
   function handleLogout() {
     Modal.confirm({
-      title: "确认退出系统？",
+      title: "确认退出当前系统？",
       okText: "确认",
       cancelText: "取消",
+      centered: true,
       onOk: () => {
         logout();
         navigate("/login");
