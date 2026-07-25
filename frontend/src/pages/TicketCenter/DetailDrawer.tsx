@@ -181,6 +181,7 @@ export default function DetailDrawer({
                 "否"
               )}
             </Descriptions.Item>
+            <Descriptions.Item label="优先级">{ticket.priority ?? "-"}</Descriptions.Item>
             <Descriptions.Item label="月度计划">{ticket.monthlyPlan.join("、") || "-"}</Descriptions.Item>
             <Descriptions.Item label="迭代">
               {ticket.iterations.map((i) => i.name).join("、") || "-"}

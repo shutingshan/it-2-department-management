@@ -3,8 +3,9 @@ import dayjs from "dayjs";
 import { store } from "../store";
 import { resolveStage } from "../mapping";
 import { fetchTapdDelta } from "../adapters/tapd";
-import { fetchNewDangquyunTickets } from "../adapters/dangquyun";
 import { SyncJob } from "../store";
+import { scrapeDangquyunTicketList } from "../scrapers/dangquyunScraper";
+import { mapScrapedRowToTicket } from "../scrapers/dangquyunMapper";
 
 const router = Router();
 
@@ -26,13 +27,16 @@ router.get("/status", (req, res) => {
 
 router.post("/fetch-new", async (req, res) => {
   const { actor } = req.body as { actor: string };
-  const year = 2026;
-  const existingThisYear = store.tickets.filter((t) => t.code.startsWith(`GD${year}`));
-  const maxSeq = existingThisYear.reduce((m, t) => Math.max(m, Number(t.code.slice(6))), 0);
-  const count = Math.floor(Math.random() * 4) + 1; // 增量获取，仅拉取工单中心没有的数据
 
   try {
-    const newTickets = await fetchNewDangquyunTickets(count, maxSeq + 1, year);
+    // 真实抓取当曲云工单列表（需要 backend/.env 配置好账号密码，见 .env.example）；
+    // 仅增量：按"编号"跟工单中心现有数据比对，只新增工单中心里还没有的
+    const result = await scrapeDangquyunTicketList();
+    const existingCodes = new Set(store.tickets.map((t) => t.code));
+    const newTickets = result.rows
+      .map((row) => mapScrapedRowToTicket(row))
+      .filter((t) => t.code && !existingCodes.has(t.code));
+
     store.tickets.unshift(...newTickets);
     store.addLog({
       type: "获取新工单",
@@ -40,19 +44,20 @@ router.post("/fetch-new", async (req, res) => {
       actor,
       success: true,
       failReason: null,
-      detail: `增量获取新工单 ${newTickets.length} 条`,
+      detail: `本次抓取 ${result.rows.length} 条（策略：${result.strategy}），增量获取新工单 ${newTickets.length} 条`,
     });
     res.json({ addedCount: newTickets.length });
   } catch (e) {
+    const message = (e as Error).message ?? "未知错误";
     store.addLog({
       type: "获取新工单",
       time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
       actor,
       success: false,
-      failReason: "当曲云接口异常",
+      failReason: message,
       detail: "获取新工单失败",
     });
-    res.status(500).json({ message: "获取新工单失败" });
+    res.status(500).json({ message: `获取新工单失败：${message}` });
   }
 });
 

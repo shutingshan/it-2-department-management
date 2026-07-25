@@ -168,6 +168,7 @@ export default function TicketCenter() {
       width: 70,
       render: (v: boolean) => (v ? <Tag color="red">是</Tag> : "否"),
     },
+    { title: "优先级", dataIndex: "priority", width: 80, render: (v: string | null) => v ?? "-" },
     {
       title: "月度计划",
       dataIndex: "monthlyPlan",

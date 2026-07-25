@@ -8,8 +8,12 @@ export default function SyncButton({ onRefresh }: { onRefresh: () => void }) {
   const [open, setOpen] = useState(false);
 
   async function handleFetchNew() {
-    const count = await fetchNew();
-    message.success(`获取新工单完成，新增 ${count ?? 0} 条`);
+    try {
+      const count = await fetchNew();
+      message.success(`获取新工单完成，新增 ${count ?? 0} 条`);
+    } catch (e: any) {
+      message.error(e?.response?.data?.message ?? "获取新工单失败");
+    }
   }
 
   async function handleUpdate() {

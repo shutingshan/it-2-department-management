@@ -45,9 +45,17 @@ export function useSync(onRefresh?: () => void) {
     setBusy(true);
     setError(null);
     try {
-      const res = await api.post("/sync/fetch-new", { actor: user.name });
+      // 真实抓取当曲云需要打开浏览器、登录、等待页面渲染，可能耗时几十秒，单独放宽超时
+      const res = await api.post(
+        "/sync/fetch-new",
+        { actor: user.name },
+        { timeout: 120000 }
+      );
       onRefresh?.();
       return res.data.addedCount as number;
+    } catch (e: any) {
+      setError(e?.response?.data?.message ?? "获取新工单失败");
+      throw e;
     } finally {
       setBusy(false);
     }

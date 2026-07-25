@@ -90,6 +90,7 @@ export interface Ticket {
   status: TicketStatus;
   devStatus: string | null;
   urgent: boolean;
+  priority: string | null;
   isReturned: boolean;
   monthlyPlan: string[];
   iterations: IterationRef[];
