@@ -124,6 +124,7 @@ export interface Ticket {
 export interface InSiteMessage {
   id: string;
   toRole: Role;
+  itHandler: string;
   requesterName: string;
   action: string;
   time: string;

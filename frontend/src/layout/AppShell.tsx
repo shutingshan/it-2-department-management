@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Avatar, Button, Layout, Menu, Modal, Space, Typography } from "antd";
+import { Avatar, Breadcrumb, Button, Layout, Menu, Modal, Space, Typography } from "antd";
 import {
   AppstoreOutlined,
   BarChartOutlined,
@@ -8,9 +8,11 @@ import {
   HomeOutlined,
   LogoutOutlined,
   SwapOutlined,
+  UserOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../store/auth";
-import SyncButton from "../components/SyncButton";
+import { useViewTargetStore, ALL_TICKETS_TARGET } from "../store/viewTarget";
+import UpdateTicketsButton from "../components/UpdateTicketsButton";
 import MessageBell from "../components/MessageBell";
 import { ROLE_LABELS } from "../api/types";
 import { api } from "../api/client";
@@ -48,8 +50,9 @@ export default function AppShell() {
     });
   }
 
-  const activeKey =
-    MENU_ITEMS.find((m) => location.pathname.startsWith(m.key))?.key ?? "/tickets";
+  const activeMenu = MENU_ITEMS.find((m) => location.pathname.startsWith(m.key));
+  const activeKey = activeMenu?.key ?? "/tickets";
+  const activeLabel = activeMenu?.label ?? "工单中心";
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
@@ -68,9 +71,15 @@ export default function AppShell() {
       </Sider>
       <Layout>
         <Header className="app-header">
-          <div className="app-header-left" />
+          <div className="app-header-left">
+            <Breadcrumb
+              items={[{ title: "IT二部工单中心" }, { title: activeLabel }]}
+            />
+          </div>
           <Space size={12} className="app-header-right">
-            <SyncButton onRefresh={() => setRefreshTick((t) => t + 1)} />
+            <MyTicketsButton />
+            <SwitchTargetButton />
+            <UpdateTicketsButton onRefresh={() => setRefreshTick((t) => t + 1)} />
             <MessageBell />
             <UserMenu />
             <Button type="text" icon={<LogoutOutlined />} onClick={handleLogout}>
@@ -83,6 +92,85 @@ export default function AppShell() {
         </Content>
       </Layout>
     </Layout>
+  );
+}
+
+function MyTicketsButton() {
+  const { user } = useAuthStore();
+  const { target } = useViewTargetStore();
+  const navigate = useNavigate();
+  if (!user) return null;
+
+  const effectiveTarget = target === ALL_TICKETS_TARGET ? undefined : target ?? user.name;
+
+  return (
+    <Button
+      icon={<UserOutlined />}
+      onClick={() =>
+        navigate("/tickets", {
+          state: { itHandler: effectiveTarget ? [effectiveTarget] : undefined },
+        })
+      }
+    >
+      我负责的工单
+    </Button>
+  );
+}
+
+function SwitchTargetButton() {
+  const { user } = useAuthStore();
+  const { target, setTarget } = useViewTargetStore();
+  const [open, setOpen] = useState(false);
+  const [users, setUsers] = useState<any[]>([]);
+
+  async function loadUsers() {
+    const res = await api.get("/auth/users", { params: { role: "it_handler" } });
+    setUsers(res.data.data);
+  }
+
+  const currentLabel =
+    target === ALL_TICKETS_TARGET ? "所有工单" : target ?? user?.name ?? "";
+
+  return (
+    <>
+      <Button icon={<SwapOutlined />} onClick={() => setOpen(true)}>
+        切换人员（{currentLabel}）
+      </Button>
+      <Modal
+        title="切换查看对象"
+        open={open}
+        onCancel={() => setOpen(false)}
+        afterOpenChange={(visible) => visible && loadUsers()}
+        footer={null}
+      >
+        <div className="switch-user-list">
+          <div
+            className={"switch-user-item" + (target === ALL_TICKETS_TARGET ? " active" : "")}
+            onClick={() => {
+              setTarget(ALL_TICKETS_TARGET);
+              setOpen(false);
+            }}
+          >
+            <span>所有工单</span>
+          </div>
+          {users.map((u) => (
+            <div
+              key={u.id}
+              className={"switch-user-item" + (target === u.name ? " active" : "")}
+              onClick={() => {
+                setTarget(u.name);
+                setOpen(false);
+              }}
+            >
+              <Avatar size="small" style={{ backgroundColor: u.avatarColor }}>
+                {u.name.slice(-1)}
+              </Avatar>
+              <span>{u.name}</span>
+            </div>
+          ))}
+        </div>
+      </Modal>
+    </>
   );
 }
 

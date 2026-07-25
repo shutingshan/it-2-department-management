@@ -6,6 +6,17 @@ import { fetchTapdDelta } from "../adapters/tapd";
 import { SyncJob } from "../store";
 import { scrapeDangquyunTicketList } from "../scrapers/dangquyunScraper";
 import { mapScrapedRowToTicket } from "../scrapers/dangquyunMapper";
+import { applyFilters, parseQuery, TicketQuery } from "../filter";
+import { Ticket } from "../types";
+
+// 按工单中心当前筛选条件圈定候选工单；未传筛选条件时回退到"全部未完成/未关闭工单"
+function resolveCandidates(filters: unknown): Ticket[] {
+  const hasFilters = filters && typeof filters === "object" && Object.keys(filters as object).length > 0;
+  if (hasFilters) {
+    return applyFilters(store.tickets, parseQuery(filters as Record<string, unknown>) as TicketQuery);
+  }
+  return store.tickets.filter((t) => t.stage !== "已完成" && t.stage !== "关闭");
+}
 
 const router = Router();
 
@@ -26,27 +37,42 @@ router.get("/status", (req, res) => {
 });
 
 router.post("/fetch-new", async (req, res) => {
-  const { actor } = req.body as { actor: string };
+  const { actor, mode } = req.body as { actor: string; mode?: "incremental" | "full" };
+  const isFull = mode === "full";
 
   try {
     // 真实抓取当曲云工单列表（需要 backend/.env 配置好账号密码，见 .env.example）；
-    // 仅增量：按"编号"跟工单中心现有数据比对，只新增工单中心里还没有的
+    // 增量模式：按"编号"跟工单中心现有数据比对，只新增工单中心里还没有的；
+    // 全量模式（用于数据初始化）：已存在的工单也会用当曲云最新数据覆盖已同步字段
     const result = await scrapeDangquyunTicketList();
-    const existingCodes = new Set(store.tickets.map((t) => t.code));
-    const newTickets = result.rows
-      .map((row) => mapScrapedRowToTicket(row))
-      .filter((t) => t.code && !existingCodes.has(t.code));
+    const existingByCode = new Map(store.tickets.map((t) => [t.code, t]));
+    let addedCount = 0;
+    let updatedCount = 0;
 
-    store.tickets.unshift(...newTickets);
+    for (const row of result.rows) {
+      const code = row["编号"]?.trim();
+      if (!code) continue;
+      const existing = existingByCode.get(code);
+      if (!existing) {
+        store.tickets.unshift(mapScrapedRowToTicket(row));
+        addedCount += 1;
+      } else if (isFull) {
+        Object.assign(existing, mapScrapedRowToTicket(row, existing));
+        updatedCount += 1;
+      }
+    }
+
     store.addLog({
       type: "获取新工单",
       time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
       actor,
       success: true,
       failReason: null,
-      detail: `本次抓取 ${result.pageCount} 页共 ${result.rows.length} 条（策略：${result.strategy}），增量获取新工单 ${newTickets.length} 条`,
+      detail: `本次抓取 ${result.pageCount} 页共 ${result.rows.length} 条（策略：${result.strategy}），${
+        isFull ? `全量获取，新增 ${addedCount} 条，覆盖更新 ${updatedCount} 条` : `增量获取新工单 ${addedCount} 条`
+      }`,
     });
-    res.json({ addedCount: newTickets.length });
+    res.json({ addedCount });
   } catch (e) {
     const message = (e as Error).message ?? "未知错误";
     store.addLog({
@@ -71,7 +97,7 @@ function stopJobTimer() {
 }
 
 router.post("/update-tickets", (req, res) => {
-  const { actor, actorRole } = req.body as { actor: string; actorRole: string };
+  const { actor, actorRole, filters } = req.body as { actor: string; actorRole: string; filters?: unknown };
 
   if (actorRole !== "admin" && !withinUpdateWindow()) {
     return res.status(403).json({
@@ -82,8 +108,8 @@ router.post("/update-tickets", (req, res) => {
     return res.status(409).json({ message: "已有同步任务在执行中" });
   }
 
-  // 仅对未完成未关闭工单批量更新，不逐条处理已关闭工单
-  const candidates = store.tickets.filter((t) => t.stage !== "已完成" && t.stage !== "关闭");
+  // 按工单中心当前筛选条件圈定候选工单；未传筛选条件时默认仅处理未完成未关闭工单
+  const candidates = resolveCandidates(filters);
   const job: SyncJob = {
     id: `job-${Date.now()}`,
     type: "update_tickets",
@@ -178,11 +204,9 @@ router.post("/terminate", (req, res) => {
 });
 
 router.post("/tapd", (req, res) => {
-  const { actor } = req.body as { actor: string };
-  // 同步 TAPD 信息：应在更新工单完成后触发，支持终止
-  const candidates = store.tickets.filter(
-    (t) => t.tapdUrl && t.stage !== "已完成" && t.stage !== "关闭"
-  );
+  const { actor, filters } = req.body as { actor: string; filters?: unknown };
+  // 获取TAPD信息：按工单中心当前筛选条件圈定候选工单（仅处理有 TAPD 地址的工单）
+  const candidates = resolveCandidates(filters).filter((t) => t.tapdUrl);
   const job: SyncJob = {
     id: `job-${Date.now()}`,
     type: "sync_tapd",

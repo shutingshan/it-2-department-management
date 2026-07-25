@@ -49,6 +49,12 @@
   border-bottom: 1px solid rgba(17, 24, 39, 0.06);
 }
 
+.app-header-left :where(.ant-breadcrumb-link) {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 500;
+}
+
 .app-header-right :where(.ant-typography) {
   color: #111827;
 }
@@ -82,4 +88,10 @@
 
 .switch-user-item:hover {
   background: #f0f2ff;
+}
+
+.switch-user-item.active {
+  background: #eef2ff;
+  color: #2f54eb;
+  font-weight: 600;
 }
