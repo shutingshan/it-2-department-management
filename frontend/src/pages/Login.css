@@ -1,24 +1,13 @@
 .login-page {
-  position: relative;
   min-height: 100vh;
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, #eef2ff 0%, #fdf2f8 50%, #fff7ed 100%);
-  overflow: hidden;
-}
-
-.login-mask {
-  position: absolute;
-  inset: 0;
-  background: rgba(8, 15, 33, 0.45);
-  backdrop-filter: blur(2px);
 }
 
 .login-card {
-  position: relative;
-  z-index: 1;
   width: 380px;
   padding: 40px 36px 32px;
   background: #fff;

@@ -48,7 +48,6 @@ export default function Login() {
 
   return (
     <div className="login-page">
-      <div className="login-mask" aria-hidden />
       <div className="login-card">
         <div className="login-flower" aria-hidden>
           {/* 小红花图标占位，后续替换为正式素材 */}
