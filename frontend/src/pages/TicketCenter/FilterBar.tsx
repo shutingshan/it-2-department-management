@@ -57,11 +57,13 @@ export default function FilterBar({
   onChange,
   facets,
   extra,
+  rightExtra,
 }: {
   filters: TicketFilters;
   onChange: (f: TicketFilters) => void;
   facets: Facets;
   extra?: ReactNode;
+  rightExtra?: ReactNode;
 }) {
   function set<K extends keyof TicketFilters>(key: K, value: TicketFilters[K]) {
     onChange({ ...filters, [key]: value });
@@ -73,7 +75,7 @@ export default function FilterBar({
 
   return (
     <div className="filter-bar">
-      <Space wrap size={[8, 8]}>
+      <Space wrap size={[8, 8]} className="filter-bar-controls">
         <Input
           allowClear
           style={{ width: 260 }}
@@ -185,6 +187,7 @@ export default function FilterBar({
         <Button onClick={clearAll}>清除筛选</Button>
         {extra}
       </Space>
+      {rightExtra && <div className="filter-bar-right">{rightExtra}</div>}
     </div>
   );
 }

@@ -203,14 +203,14 @@ export default function TicketCenter() {
         onChange={setFilters}
         facets={facets}
         extra={
-          <Space size={12}>
-            <Button icon={<ExportOutlined />} onClick={handleExport}>
-              导出
-            </Button>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              工单同步时间：{lastUpdateTime || "-"}
-            </Typography.Text>
-          </Space>
+          <Button icon={<ExportOutlined />} onClick={handleExport}>
+            导出
+          </Button>
+        }
+        rightExtra={
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            工单同步时间：{lastUpdateTime || "-"}
+          </Typography.Text>
         }
       />
 

@@ -9,6 +9,20 @@
   background: #fff;
   padding: 12px 16px;
   border-radius: 8px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.filter-bar-controls {
+  flex: 1;
+}
+
+.filter-bar-right {
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding-top: 6px;
 }
 
 .tc-table-card {
