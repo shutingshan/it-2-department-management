@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Pagination, Space, Table, Tag, Tooltip, Typography, message } from "antd";
-import { CopyOutlined } from "@ant-design/icons";
+import { CopyOutlined, ExportOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useLocation, useOutletContext } from "react-router-dom";
+import { api } from "../../api/client";
 import { hoursDeviation, STAGE_COLORS } from "../../api/types";
 import type { Ticket } from "../../api/types";
 import { useFilteredTicketsStore } from "../../store/filteredTickets";
@@ -25,6 +26,7 @@ export default function TicketCenter() {
   const [pageSize, setPageSize] = useState(20);
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [lastUpdateTime, setLastUpdateTime] = useState("");
 
   // 支持从头部"我负责的工单"等入口重复导航到 /tickets 时，也能重新应用筛选条件
   useEffect(() => {
@@ -40,6 +42,11 @@ export default function TicketCenter() {
     publishFilters(filters);
   }, [filters, publishFilters]);
 
+  // 工单同步时间：记录上一次"更新工单"逻辑处理完成的时间
+  useEffect(() => {
+    api.get("/sync/status").then((res) => setLastUpdateTime(res.data.lastUpdateTime));
+  }, [refreshTick]);
+
   const { data, total, facets, loading, reload } = useTickets(filters, page, pageSize, refreshTick);
 
   const lastTicket = useMemo(
@@ -50,6 +57,16 @@ export default function TicketCenter() {
   function openDetail(id: string) {
     setActiveTicketId(id);
     setDetailOpen(true);
+  }
+
+  async function handleExport() {
+    const res = await api.post("/export", filters, { responseType: "blob" });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "IT二部工单数据.zip";
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   const columns: ColumnsType<Ticket> = [
@@ -172,6 +189,17 @@ export default function TicketCenter() {
 
   return (
     <div className="ticket-center-page">
+      <div className="tc-toolbar">
+        <Space>
+          <Button icon={<ExportOutlined />} onClick={handleExport}>
+            导出
+          </Button>
+        </Space>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          工单同步时间：{lastUpdateTime || "-"}
+        </Typography.Text>
+      </div>
+
       <StatCards
         activeCardKey={filters.cardKey}
         refreshKey={refreshTick}

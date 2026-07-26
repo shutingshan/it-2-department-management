@@ -9,11 +9,13 @@ export interface TicketFilters {
   stage?: string[];
   status?: string[];
   urgent?: boolean;
+  hasTapd?: boolean;
   monthlyPlan?: string[];
   iteration?: string[];
   owningApp?: string[];
   requesterDept?: string[];
   requester?: string[];
+  watcher?: string[];
   itHandler?: string[];
   cardKey?: string;
   sortField?: string;
@@ -22,6 +24,7 @@ export interface TicketFilters {
 
 export interface Facets {
   requesters: string[];
+  watchers: string[];
   itHandlers: string[];
   developers: string[];
   monthlyPlans: string[];
@@ -31,6 +34,7 @@ export interface Facets {
 
 const EMPTY_FACETS: Facets = {
   requesters: [],
+  watchers: [],
   itHandlers: [],
   developers: [],
   monthlyPlans: [],

@@ -14,7 +14,9 @@ export interface TicketQuery {
   owningApp?: string[];
   requesterDept?: string[];
   requester?: string[];
+  watcher?: string[];
   itHandler?: string[];
+  hasTapd?: boolean;
   cardKey?: string;
   sortField?: string;
   sortOrder?: "asc" | "desc";
@@ -39,7 +41,9 @@ export function parseQuery(q: Record<string, unknown>): TicketQuery {
     owningApp: toArray(q.owningApp),
     requesterDept: toArray(q.requesterDept),
     requester: toArray(q.requester),
+    watcher: toArray(q.watcher),
     itHandler: toArray(q.itHandler),
+    hasTapd: q.hasTapd === "true" ? true : q.hasTapd === "false" ? false : undefined,
     cardKey: q.cardKey ? String(q.cardKey) : undefined,
     sortField: q.sortField ? String(q.sortField) : "submittedAt",
     sortOrder: q.sortOrder === "asc" ? "asc" : "desc",
@@ -59,6 +63,7 @@ function matchesSearch(t: Ticket, kw: string): boolean {
     t.itHandler,
     t.tapdUrl ?? "",
     ...t.developer,
+    ...t.watcher,
   ]
     .join(" ")
     .toLowerCase();
@@ -80,7 +85,9 @@ export function applyFilters(tickets: Ticket[], q: TicketQuery): Ticket[] {
   if (q.owningApp?.length) result = result.filter((t) => q.owningApp!.includes(t.owningApp));
   if (q.requesterDept?.length) result = result.filter((t) => q.requesterDept!.includes(t.requesterDept));
   if (q.requester?.length) result = result.filter((t) => q.requester!.includes(t.requester));
+  if (q.watcher?.length) result = result.filter((t) => t.watcher.some((w) => q.watcher!.includes(w)));
   if (q.itHandler?.length) result = result.filter((t) => q.itHandler!.includes(t.itHandler));
+  if (q.hasTapd !== undefined) result = result.filter((t) => (t.tapdUrl !== null) === q.hasTapd);
   if (q.cardKey) result = filterByCard(result, q.cardKey);
 
   const field = q.sortField ?? "submittedAt";

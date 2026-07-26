@@ -25,6 +25,7 @@ router.get("/", (req, res) => {
   // 下拉候选值以当前筛选结果为边界，不越界到全量数据
   const facets = {
     requesters: dedupe(filtered.map((t) => t.requester)).sort(),
+    watchers: dedupe(filtered.flatMap((t) => t.watcher)).sort(),
     itHandlers: dedupe(filtered.map((t) => t.itHandler)).sort(),
     developers: dedupe(filtered.flatMap((t) => t.developer)).sort(),
     monthlyPlans: dedupe(filtered.flatMap((t) => t.monthlyPlan)).sort(),
