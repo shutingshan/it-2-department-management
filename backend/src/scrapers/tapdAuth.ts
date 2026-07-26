@@ -13,6 +13,7 @@
  */
 import fs from "fs";
 import path from "path";
+import readline from "readline";
 import { Browser, BrowserContext, Page, chromium } from "playwright";
 import { config } from "../config";
 
@@ -26,8 +27,8 @@ function ensureDirs() {
 }
 
 async function gotoAndSettle(page: Page, url: string) {
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-  const deadline = Date.now() + 60000;
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120000 });
+  const deadline = Date.now() + 120000;
   while (Date.now() < deadline) {
     try {
       const text = await page.evaluate(() => document.body?.innerText?.trim().length ?? 0);
@@ -71,20 +72,17 @@ async function looksLoggedOut(context: BrowserContext): Promise<boolean> {
   return qrCount > 0;
 }
 
-// 等待用户用手机扫码完成登录（仅供 tapdLogin.ts 交互式登录脚本调用，非无头模式下才有意义）
-async function waitForQrLogin(context: BrowserContext, page: Page, timeoutMs = 120000) {
-  console.log("[tapd] 检测到尚未登录，请在弹出的浏览器窗口中使用手机 TAPD/企业微信扫码登录……");
-  await dumpDebug(context, "qrcode-waiting");
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!(await looksLoggedOut(context))) {
-      console.log("[tapd] 已检测到登录成功");
-      return;
-    }
-    await page.waitForTimeout(1000);
-  }
-  await dumpDebug(context, "qrcode-timeout");
-  throw new Error(`等待扫码登录超时（${Math.round(timeoutMs / 1000)}秒），请重新运行 npm run tapd:login 并尽快扫码`);
+// 终端里等用户按回车：真实登录流程可能需要先点"登录"按钮才会出现二维码，
+// 步骤数、页面结构都是猜的，与其用选择器猜"是否已登录"（猜错就会在用户还没来得及操作时
+// 提前判定"已登录"并把浏览器关掉），不如让用户自己确认完成登录后再继续——更慢但绝对不会出错
+function waitForEnter(promptText: string): Promise<void> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(promptText, () => {
+      rl.close();
+      resolve();
+    });
+  });
 }
 
 // 无头同步（含每日定时任务）调用：只复用已保存的登录态，登录态无效则直接抛错，
@@ -109,7 +107,9 @@ export async function getHeadlessAuthenticatedContext(browser: Browser): Promise
   return context;
 }
 
-// 交互式登录（仅供 tapdLogin.ts 调用）：非无头模式打开浏览器，等待人工扫码，成功后保存登录态
+// 交互式登录（仅供 tapdLogin.ts 调用）：非无头模式打开浏览器，人工完成登录（可能需要先点"登录"
+// 按钮才会出现二维码，再扫码），由用户自己在终端按回车确认登录完成后才保存登录态并关闭浏览器——
+// 不靠选择器猜"是否已登录"，避免猜错导致浏览器在用户还没操作完就被提前关掉
 export async function performInteractiveLogin(): Promise<void> {
   ensureDirs();
   const browser = await chromium.launch({ headless: false, channel: config.tapd.browserChannel });
@@ -117,13 +117,12 @@ export async function performInteractiveLogin(): Promise<void> {
     const context = await browser.newContext();
     const page = await context.newPage();
     await gotoAndSettle(page, config.tapd.baseUrl);
+    await dumpDebug(context, "before-manual-login");
 
-    if (await looksLoggedOut(context)) {
-      await waitForQrLogin(context, page);
-    } else {
-      console.log("[tapd] 当前浏览器已是登录状态");
-    }
+    console.log("[tapd] 浏览器窗口已打开，请在该窗口里手动完成登录（可能需要先点击登录按钮，再扫码）。");
+    await waitForEnter("[tapd] 完成登录后回到这里，按回车键继续保存登录态：");
 
+    await dumpDebug(context, "after-manual-login");
     await context.storageState({ path: STATE_PATH });
     console.log(`[tapd] 登录态已保存到 ${STATE_PATH}`);
   } finally {
