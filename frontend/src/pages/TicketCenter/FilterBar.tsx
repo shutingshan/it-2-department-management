@@ -21,7 +21,17 @@ function boolToYesNoValue(v: boolean | undefined): string[] {
 
 const { RangePicker } = DatePicker;
 
-const STAGE_OPTIONS = ["待排期", "方案梳理", "开发中", "测试验收中", "已完成", "关闭"].map((v) => ({
+const STAGE_OPTIONS = [
+  "待分配",
+  "待补充资料",
+  "方案梳理",
+  "待排期",
+  "已排期",
+  "开发中",
+  "测试验收",
+  "已完成",
+  "关闭",
+].map((v) => ({
   value: v,
   label: v,
 }));

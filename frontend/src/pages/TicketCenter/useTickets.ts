@@ -17,6 +17,7 @@ export interface TicketFilters {
   requester?: string[];
   watcher?: string[];
   itHandler?: string[];
+  cardKey?: string;
   sortField?: string;
   sortOrder?: "asc" | "desc";
 }

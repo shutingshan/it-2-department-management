@@ -1,5 +1,6 @@
 import dayjs from "dayjs";
 import { Ticket } from "./types";
+import { filterByCard } from "./cards";
 
 export interface TicketQuery {
   search?: string;
@@ -16,6 +17,7 @@ export interface TicketQuery {
   watcher?: string[];
   itHandler?: string[];
   hasTapd?: boolean;
+  cardKey?: string;
   sortField?: string;
   sortOrder?: "asc" | "desc";
 }
@@ -42,6 +44,7 @@ export function parseQuery(q: Record<string, unknown>): TicketQuery {
     watcher: toArray(q.watcher),
     itHandler: toArray(q.itHandler),
     hasTapd: q.hasTapd === "true" ? true : q.hasTapd === "false" ? false : undefined,
+    cardKey: q.cardKey ? String(q.cardKey) : undefined,
     sortField: q.sortField ? String(q.sortField) : "submittedAt",
     sortOrder: q.sortOrder === "asc" ? "asc" : "desc",
   };
@@ -85,6 +88,7 @@ export function applyFilters(tickets: Ticket[], q: TicketQuery): Ticket[] {
   if (q.watcher?.length) result = result.filter((t) => t.watcher.some((w) => q.watcher!.includes(w)));
   if (q.itHandler?.length) result = result.filter((t) => q.itHandler!.includes(t.itHandler));
   if (q.hasTapd !== undefined) result = result.filter((t) => (t.tapdUrl !== null) === q.hasTapd);
+  if (q.cardKey) result = filterByCard(result, q.cardKey);
 
   const field = q.sortField ?? "submittedAt";
   const order = q.sortOrder ?? "desc";

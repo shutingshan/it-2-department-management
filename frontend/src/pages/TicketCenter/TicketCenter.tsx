@@ -1,40 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  Button,
-  Modal,
-  Pagination,
-  Radio,
-  Select,
-  Space,
-  Table,
-  Tag,
-  Tooltip,
-  Typography,
-  message,
-} from "antd";
-import {
-  AppstoreOutlined,
-  CopyOutlined,
-  ExportOutlined,
-  ReloadOutlined,
-  UnorderedListOutlined,
-} from "@ant-design/icons";
+import { Button, Pagination, Space, Table, Tag, Tooltip, Typography, message } from "antd";
+import { CopyOutlined, ExportOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useLocation, useOutletContext } from "react-router-dom";
 import { api } from "../../api/client";
 import { hoursDeviation, STAGE_COLORS } from "../../api/types";
 import type { Ticket } from "../../api/types";
-import { useAuthStore } from "../../store/auth";
 import { useFilteredTicketsStore } from "../../store/filteredTickets";
 import { useTickets } from "./useTickets";
 import type { TicketFilters } from "./useTickets";
 import FilterBar from "./FilterBar";
 import DetailDrawer from "./DetailDrawer";
-import KanbanView from "./KanbanView";
+import StatCards from "./StatCards";
 import "./TicketCenter.css";
 
 export default function TicketCenter() {
-  const { user } = useAuthStore();
   const { refreshTick } = useOutletContext<{ refreshTick: number }>();
   const location = useLocation();
   const [filters, setFilters] = useState<TicketFilters>({
@@ -44,10 +24,8 @@ export default function TicketCenter() {
   });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [view, setView] = useState<"list" | "kanban">("list");
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [localRefresh, setLocalRefresh] = useState(0);
   const [lastUpdateTime, setLastUpdateTime] = useState("");
 
   // 支持从头部"我负责的工单"等入口重复导航到 /tickets 时，也能重新应用筛选条件
@@ -67,14 +45,9 @@ export default function TicketCenter() {
   // 工单同步时间：记录上一次"更新工单"逻辑处理完成的时间
   useEffect(() => {
     api.get("/sync/status").then((res) => setLastUpdateTime(res.data.lastUpdateTime));
-  }, [refreshTick, localRefresh]);
+  }, [refreshTick]);
 
-  const { data, total, facets, loading, reload } = useTickets(
-    filters,
-    page,
-    pageSize,
-    refreshTick + localRefresh
-  );
+  const { data, total, facets, loading, reload } = useTickets(filters, page, pageSize, refreshTick);
 
   const lastTicket = useMemo(
     () => data.find((t) => t.id === activeTicketId) ?? null,
@@ -84,13 +57,6 @@ export default function TicketCenter() {
   function openDetail(id: string) {
     setActiveTicketId(id);
     setDetailOpen(true);
-  }
-
-  async function handleClaim(t: Ticket) {
-    if (!user) return;
-    await api.post(`/tickets/${t.id}/claim`, { actor: user.name });
-    message.success(`已接单：${t.code}`);
-    reload();
   }
 
   async function handleExport() {
@@ -216,14 +182,8 @@ export default function TicketCenter() {
     {
       title: "操作",
       fixed: "right",
-      width: 130,
-      render: (_, r) => (
-        <Space size={4}>
-          <a onClick={() => openDetail(r.id)}>详情</a>
-          <a onClick={() => handleClaim(r)}>接单</a>
-          <TransferAction ticket={r} handlers={facets.itHandlers} onDone={reload} />
-        </Space>
-      ),
+      width: 70,
+      render: (_, r) => <a onClick={() => openDetail(r.id)}>详情</a>,
     },
   ];
 
@@ -235,63 +195,55 @@ export default function TicketCenter() {
             导出
           </Button>
         </Space>
-        <Space size={16}>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            工单同步时间：{lastUpdateTime || "-"}
-          </Typography.Text>
-          <Button icon={<ReloadOutlined />} onClick={() => setLocalRefresh((x) => x + 1)} />
-          <Radio.Group value={view} onChange={(e) => setView(e.target.value)}>
-            <Radio.Button value="list">
-              <UnorderedListOutlined /> 列表
-            </Radio.Button>
-            <Radio.Button value="kanban">
-              <AppstoreOutlined /> 看板
-            </Radio.Button>
-          </Radio.Group>
-        </Space>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          工单同步时间：{lastUpdateTime || "-"}
+        </Typography.Text>
       </div>
+
+      <StatCards
+        activeCardKey={filters.cardKey}
+        refreshKey={refreshTick}
+        onSelect={(cardKey) => {
+          setFilters({ sortField: "submittedAt", sortOrder: "desc", cardKey });
+          setPage(1);
+        }}
+      />
 
       <FilterBar filters={filters} onChange={setFilters} facets={facets} />
 
       <div className="tc-table-card">
-        {view === "list" ? (
-          <>
-            <Table
-              rowKey="id"
-              size="small"
-              loading={loading}
-              dataSource={data}
-              columns={columns}
-              pagination={false}
-              scroll={{ x: 2400, y: "calc(100vh - 420px)" }}
-              rowClassName={(r) => (r.urgent ? "row-urgent" : "")}
-              onChange={(_, __, sorter: any) => {
-                if (sorter?.field) {
-                  setFilters((f) => ({
-                    ...f,
-                    sortField: sorter.field,
-                    sortOrder: sorter.order === "ascend" ? "asc" : "desc",
-                  }));
-                }
-              }}
-            />
-            <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
-              <Pagination
-                current={page}
-                pageSize={pageSize}
-                total={total}
-                showSizeChanger
-                showTotal={(t) => `共 ${t} 条`}
-                onChange={(p, ps) => {
-                  setPage(p);
-                  setPageSize(ps);
-                }}
-              />
-            </div>
-          </>
-        ) : (
-          <KanbanView tickets={data} onOpen={openDetail} />
-        )}
+        <Table
+          rowKey="id"
+          size="small"
+          loading={loading}
+          dataSource={data}
+          columns={columns}
+          pagination={false}
+          scroll={{ x: 2400, y: "calc(100vh - 420px)" }}
+          rowClassName={(r) => (r.urgent ? "row-urgent" : "")}
+          onChange={(_, __, sorter: any) => {
+            if (sorter?.field) {
+              setFilters((f) => ({
+                ...f,
+                sortField: sorter.field,
+                sortOrder: sorter.order === "ascend" ? "asc" : "desc",
+              }));
+            }
+          }}
+        />
+        <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+          <Pagination
+            current={page}
+            pageSize={pageSize}
+            total={total}
+            showSizeChanger
+            showTotal={(t) => `共 ${t} 条`}
+            onChange={(p, ps) => {
+              setPage(p);
+              setPageSize(ps);
+            }}
+          />
+        </div>
       </div>
 
       <div className="floating-actions">
@@ -323,45 +275,5 @@ export default function TicketCenter() {
         onSaved={reload}
       />
     </div>
-  );
-}
-
-function TransferAction({
-  ticket,
-  handlers,
-  onDone,
-}: {
-  ticket: Ticket;
-  handlers: string[];
-  onDone: () => void;
-}) {
-  const { user } = useAuthStore();
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <a onClick={() => setOpen(true)}>转交</a>
-      <Modal
-        title={`转交工单 ${ticket.code}`}
-        open={open}
-        onCancel={() => setOpen(false)}
-        onOk={async () => {
-          setOpen(false);
-        }}
-        footer={null}
-      >
-        <Select
-          style={{ width: "100%" }}
-          placeholder="选择接收人"
-          options={handlers.map((h) => ({ value: h, label: h }))}
-          onChange={async (val) => {
-            if (!user) return;
-            await api.post(`/tickets/${ticket.id}/transfer`, { actor: user.name, to: val });
-            message.success(`已转交给 ${val}`);
-            setOpen(false);
-            onDone();
-          }}
-        />
-      </Modal>
-    </>
   );
 }
