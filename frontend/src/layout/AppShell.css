@@ -38,6 +38,17 @@
   background: transparent;
 }
 
+.ant-layout-sider-collapsed .app-logo {
+  padding: 0;
+  justify-content: center;
+}
+
+.app-sider .ant-layout-sider-trigger {
+  background: #eef2ff;
+  color: #111827;
+  border-top: 1px solid rgba(17, 24, 39, 0.06);
+}
+
 .app-header {
   background: linear-gradient(90deg, #eef2ff 0%, #fdf2f8 55%, #fff7ed 100%);
   display: flex;
