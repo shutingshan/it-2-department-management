@@ -4,6 +4,7 @@ import morgan from "morgan";
 import path from "path";
 import fs from "fs";
 import authRouter from "./routes/auth";
+import accountsRouter from "./routes/accounts";
 import ticketsRouter from "./routes/tickets";
 import syncRouter from "./routes/sync";
 import statsRouter from "./routes/stats";
@@ -20,6 +21,7 @@ app.use(morgan("dev"));
 app.use(express.json());
 
 app.use("/api/auth", authRouter);
+app.use("/api/accounts", accountsRouter);
 app.use("/api/tickets", ticketsRouter);
 app.use("/api/sync", syncRouter);
 app.use("/api/stats", statsRouter);

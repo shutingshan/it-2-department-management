@@ -1,7 +1,20 @@
 import { Router } from "express";
 import { store } from "../store";
+import { Account } from "../types";
 
 const router = Router();
+
+function toSessionUser(account: Account) {
+  const base = store.users.find((u) => u.id === account.userId);
+  return {
+    id: account.userId,
+    name: account.name,
+    pinyin: account.pinyin,
+    role: account.role,
+    departmentId: base?.departmentId ?? "",
+    avatarColor: base?.avatarColor ?? "#999999",
+  };
+}
 
 router.post("/login", (req, res) => {
   const { account } = req.body as { account?: string };
@@ -9,24 +22,30 @@ router.post("/login", (req, res) => {
     return res.status(400).json({ message: "请输入账号" });
   }
   const kw = account.trim().toLowerCase();
-  const user = store.users.find(
-    (u) => u.name.toLowerCase() === kw || u.pinyin.toLowerCase() === kw
+  const matched = store.accounts.find(
+    (a) => a.name.toLowerCase() === kw || a.pinyin.toLowerCase() === kw
   );
-  const admin = store.users.find((u) => u.role === "admin");
-  if (!user) {
+  const admin = store.accounts.find((a) => a.role === "admin");
+  if (!matched) {
     return res.status(404).json({
-      message: "账号不存在",
+      message: "当前账号未授权，请联系管理员进行授权",
       adminName: admin?.name ?? "管理员",
     });
   }
-  return res.json({ user });
+  return res.json({ user: toSessionUser(matched) });
 });
 
 router.get("/me", (req, res) => {
   const { userId } = req.query as { userId?: string };
-  const user = store.users.find((u) => u.id === userId);
-  if (!user) return res.status(404).json({ message: "账号不存在" });
-  res.json({ user });
+  const matched = store.accounts.find((a) => a.userId === userId);
+  const admin = store.accounts.find((a) => a.role === "admin");
+  if (!matched) {
+    return res.status(404).json({
+      message: "当前账号未授权，请联系管理员进行授权",
+      adminName: admin?.name ?? "管理员",
+    });
+  }
+  res.json({ user: toSessionUser(matched) });
 });
 
 router.get("/users", (req, res) => {

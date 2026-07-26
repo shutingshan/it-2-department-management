@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api/client";
 import type { Ticket } from "../../api/types";
+import { useAuthStore } from "../../store/auth";
 
 export interface TicketFilters {
   search?: string;
@@ -43,6 +44,7 @@ const EMPTY_FACETS: Facets = {
 };
 
 export function useTickets(filters: TicketFilters, page: number, pageSize: number, refreshKey: number) {
+  const { user } = useAuthStore();
   const [data, setData] = useState<Ticket[]>([]);
   const [total, setTotal] = useState(0);
   const [facets, setFacets] = useState<Facets>(EMPTY_FACETS);
@@ -51,7 +53,13 @@ export function useTickets(filters: TicketFilters, page: number, pageSize: numbe
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params: Record<string, unknown> = { ...filters, page, pageSize };
+      const params: Record<string, unknown> = {
+        ...filters,
+        page,
+        pageSize,
+        actor: user?.name,
+        actorRole: user?.role,
+      };
       const res = await api.get("/tickets", { params });
       setData(res.data.data);
       setTotal(res.data.total);

@@ -1,5 +1,8 @@
 export type Role = "admin" | "it_handler" | "requester" | "developer" | "tester" | "pm";
 
+// 账号配置支持的登录角色：开发人员/测试人员/产品经理仅作为工单数据里的人员标签存在，不具备登录能力
+export type AccountRole = "admin" | "it_handler" | "requester";
+
 export interface User {
   id: string;
   name: string;
@@ -7,6 +10,15 @@ export interface User {
   role: Role;
   departmentId: string;
   avatarColor: string;
+}
+
+export interface Account {
+  id: string;
+  userId: string;
+  name: string;
+  pinyin: string;
+  role: AccountRole;
+  locked?: boolean;
 }
 
 export interface Department {

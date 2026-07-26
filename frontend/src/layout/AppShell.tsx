@@ -7,6 +7,7 @@ import {
   ClusterOutlined,
   HomeOutlined,
   LogoutOutlined,
+  SettingOutlined,
   SwapOutlined,
   UserOutlined,
 } from "@ant-design/icons";
@@ -20,7 +21,7 @@ import "./AppShell.css";
 
 const { Sider, Header, Content } = Layout;
 
-const MENU_ITEMS = [
+const BASE_MENU_ITEMS = [
   { key: "/home", icon: <HomeOutlined />, label: "首页" },
   { key: "/tickets", icon: <AppstoreOutlined />, label: "工单中心" },
   { key: "/dev-hours", icon: <BarChartOutlined />, label: "开发工时统计" },
@@ -37,6 +38,12 @@ export default function AppShell() {
   if (!user) {
     return <Navigate to="/login" replace />;
   }
+
+  // "账号配置"仅管理员可见
+  const MENU_ITEMS =
+    user.role === "admin"
+      ? [...BASE_MENU_ITEMS, { key: "/account-config", icon: <SettingOutlined />, label: "账号配置" }]
+      : BASE_MENU_ITEMS;
 
   function handleLogout() {
     Modal.confirm({
