@@ -402,6 +402,7 @@ export default function TicketCenter() {
               pagination={false}
               sticky
               scroll={{ x: 2600, y: "calc(100vh - 420px)" }}
+              rowClassName={(r) => (r.urgent ? "row-urgent" : "")}
               components={{ header: { cell: DraggableHeaderCell } }}
               onChange={(_, __, sorter: any) => {
                 if (sorter?.field) {
