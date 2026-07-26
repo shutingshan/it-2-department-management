@@ -23,7 +23,7 @@ type Locatable = Page | Frame;
 // 当曲云基于 antd 组件库，表格数据是异步加载的：外壳（左侧菜单、顶部标签）先渲染出来，
 // 真正的工单列表在请求完成前会一直显示 antd 的加载中转圈（class 带 spin-spinning），
 // 不能只看页面有没有文字（菜单文字一直都在），要专门等这个转圈状态消失
-async function waitForSpinnersToFinish(targets: Locatable[], timeoutMs = 60000) {
+async function waitForSpinnersToFinish(targets: Locatable[], timeoutMs = 120000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     let anySpinning = false;
