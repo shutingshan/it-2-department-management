@@ -8,7 +8,7 @@ import { SyncJob } from "../store";
 import { ScrapedRow, scrapeDangquyunTicketList } from "../scrapers/dangquyunScraper";
 import { mapScrapedRowToTicket } from "../scrapers/dangquyunMapper";
 import { getHeadlessAuthenticatedContext, launchHeadlessBrowser } from "../scrapers/tapdAuth";
-import { scrapeTapdStoryFields } from "../scrapers/tapdScraper";
+import { scrapeTapdStoryFields, TapdStoryFields } from "../scrapers/tapdScraper";
 import { applyFilters, parseQuery, TicketQuery } from "../filter";
 import { Ticket } from "../types";
 
@@ -290,6 +290,90 @@ router.post("/terminate", (req, res) => {
   res.json({ job: store.currentJob });
 });
 
+// 把抓到的TAPD字段应用到工单上并按需重新计算工单阶段；批量任务和单条同步共用同一份逻辑，
+// 避免两处各写一套导致字段口径不一致
+function applyTapdFields(ticket: Ticket, fields: TapdStoryFields) {
+  if (fields.tapdStatus) ticket.devStatus = fields.tapdStatus;
+  if (fields.estimatedHours !== null) ticket.estimatedHours = fields.estimatedHours;
+  if (fields.actualHours !== null) ticket.actualHours = fields.actualHours;
+  if (fields.developer.length) ticket.developer = fields.developer;
+  if (fields.currentHandler) ticket.currentHandler = fields.currentHandler;
+
+  const newStage = resolveStage(ticket.status, ticket.devStatus, ticket.iterations);
+  if (newStage !== ticket.stage) {
+    store.addChangeLog(ticket, [
+      {
+        field: "stage",
+        oldValue: ticket.stage,
+        newValue: newStage,
+        time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
+        actor: "系统同步",
+      },
+    ]);
+    ticket.stage = newStage;
+  }
+}
+
+// 同一条工单不允许被批量任务和"点击TAPD地址"单条同步同时处理，避免两边并发写同一个 ticket 对象
+const ticketsSyncingTapd = new Set<string>();
+
+// 点击工单列表 TAPD 列地址时触发：只同步这一条工单，不占用批量任务的进度弹窗/store.currentJob。
+// 无独立并发锁保护批量任务本身（批量任务见 startTapdJob），但会跟批量任务共享同一份"正在同步"标记，
+// 防止同一条工单被两边同时处理
+export async function syncSingleTicketTapd(ticket: Ticket, actor: string): Promise<void> {
+  if (!ticket.tapdUrl) {
+    throw new Error("该工单未关联TAPD地址");
+  }
+  if (ticketsSyncingTapd.has(ticket.id)) {
+    throw new Error("该工单正在同步TAPD信息，请稍后再试");
+  }
+  ticketsSyncingTapd.add(ticket.id);
+  let browser: Browser | null = null;
+  const time = () => dayjs().format("YYYY-MM-DD HH:mm:ss");
+  try {
+    browser = await launchHeadlessBrowser();
+    const context = await getHeadlessAuthenticatedContext(browser);
+    const fields = await scrapeTapdStoryFields(context, ticket.tapdUrl);
+    applyTapdFields(ticket, fields);
+    ticket.tapdErrorNote = null;
+    store.addLog({
+      type: "同步TAPD",
+      time: time(),
+      actor,
+      success: true,
+      failReason: null,
+      detail: `单条同步TAPD：工单 ${ticket.code}`,
+    });
+  } catch (e) {
+    const reason = (e as Error).message ?? "TAPD 同步失败";
+    ticket.tapdErrorNote = { time: time(), message: reason };
+    store.addLog({
+      type: "同步TAPD",
+      time: time(),
+      actor,
+      success: false,
+      failReason: reason,
+      detail: `单条同步TAPD失败：工单 ${ticket.code}`,
+    });
+    throw e;
+  } finally {
+    ticketsSyncingTapd.delete(ticket.id);
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
+router.post("/tapd/:id", async (req, res) => {
+  const ticket = store.getTicket(req.params.id);
+  if (!ticket) return res.status(404).json({ message: "工单不存在" });
+  const { actor } = req.body as { actor?: string };
+  try {
+    await syncSingleTicketTapd(ticket, actor ?? "未知");
+    res.json({ data: ticket });
+  } catch (e) {
+    res.status(500).json({ message: (e as Error).message ?? "同步TAPD信息失败" });
+  }
+});
+
 // 获取TAPD信息：供路由与定时任务共用；不传 filters 时默认仅覆盖未完成未关闭且有TAPD地址的数据。
 // 按条更新（每条各自开一个页面抓取），整个任务共用一个已登录的浏览器上下文；
 // 若登录态无效/已过期，任务直接整体失败（不会在服务器上弹出无人可见的扫码窗口）
@@ -352,27 +436,17 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
       const batch = candidates.slice(idx, idx + 5);
       idx += 5;
       for (const ticket of batch) {
+        // 这条工单正被"点击TAPD地址"单条同步占用，本轮批量跳过，避免并发写同一个 ticket 对象
+        if (ticketsSyncingTapd.has(ticket.id)) {
+          job.failed += 1;
+          job.failReasons.push(`${ticket.code}: 该工单正在被单条同步占用，本次批量跳过`);
+          job.processed += 1;
+          continue;
+        }
+        ticketsSyncingTapd.add(ticket.id);
         try {
           const fields = await scrapeTapdStoryFields(authedContext, ticket.tapdUrl!);
-          if (fields.tapdStatus) ticket.devStatus = fields.tapdStatus;
-          if (fields.estimatedHours !== null) ticket.estimatedHours = fields.estimatedHours;
-          if (fields.actualHours !== null) ticket.actualHours = fields.actualHours;
-          if (fields.developer.length) ticket.developer = fields.developer;
-          if (fields.currentHandler) ticket.currentHandler = fields.currentHandler;
-
-          const newStage = resolveStage(ticket.status, ticket.devStatus, ticket.iterations);
-          if (newStage !== ticket.stage) {
-            store.addChangeLog(ticket, [
-              {
-                field: "stage",
-                oldValue: ticket.stage,
-                newValue: newStage,
-                time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
-                actor: "系统同步",
-              },
-            ]);
-            ticket.stage = newStage;
-          }
+          applyTapdFields(ticket, fields);
           ticket.tapdErrorNote = null; // 本次同步成功，清除历史异常标记
           job.success += 1;
         } catch (e) {
@@ -381,6 +455,8 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
           job.failReasons.push(`${ticket.code}: ${reason}`);
           // 按条更新：更新失败记录到 TAPD 异常备注字段，保留时间与原因
           ticket.tapdErrorNote = { time: dayjs().format("YYYY-MM-DD HH:mm:ss"), message: reason };
+        } finally {
+          ticketsSyncingTapd.delete(ticket.id);
         }
         job.processed += 1;
       }

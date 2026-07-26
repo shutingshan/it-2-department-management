@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Input, Pagination, Space, Switch, Table, Tag, Tooltip, Typography, message } from "antd";
+import { Button, Input, Pagination, Space, Spin, Switch, Table, Tag, Tooltip, Typography, message } from "antd";
 import { CopyOutlined, ExportOutlined } from "@ant-design/icons";
 import type { ColumnsType, ColumnType } from "antd/es/table";
 import {
@@ -146,6 +146,39 @@ function InlineRemarkInput({ ticket, onSaved }: { ticket: Ticket; onSaved: () =>
   );
 }
 
+// 点击TAPD列地址：正常打开TAPD需求详情页的同时，触发一次只针对这一条工单的TAPD字段同步
+function TapdLinkCell({ ticket, onSynced }: { ticket: Ticket; onSynced: () => void }) {
+  const { user } = useAuthStore();
+  const [syncing, setSyncing] = useState(false);
+
+  async function handleClick() {
+    if (!user || syncing) return;
+    setSyncing(true);
+    try {
+      await api.post(`/sync/tapd/${ticket.id}`, { actor: user.name });
+      message.success(`工单 ${ticket.code} 的TAPD信息已同步`);
+      onSynced();
+    } catch (e: any) {
+      message.error(e?.response?.data?.message ?? "同步TAPD信息失败");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  if (!ticket.tapdUrl) {
+    return <Typography.Text type="secondary">-</Typography.Text>;
+  }
+
+  return (
+    <Space size={4}>
+      <a href={ticket.tapdUrl} target="_blank" rel="noreferrer" onClick={handleClick}>
+        查看
+      </a>
+      {syncing && <Spin size="small" />}
+    </Space>
+  );
+}
+
 export default function TicketCenter() {
   const { refreshTick } = useOutletContext<{ refreshTick: number }>();
   const location = useLocation();
@@ -242,14 +275,7 @@ export default function TicketCenter() {
         title: "TAPD",
         dataIndex: "tapdUrl",
         width: 90,
-        render: (url: string | null) =>
-          url ? (
-            <a href={url} target="_blank" rel="noreferrer">
-              查看
-            </a>
-          ) : (
-            <Typography.Text type="secondary">-</Typography.Text>
-          ),
+        render: (_: string | null, r: Ticket) => <TapdLinkCell ticket={r} onSynced={reload} />,
       },
       owningApp: { title: "归属应用", dataIndex: "owningApp", width: 110, ellipsis: true },
       requester: { title: "发起人", dataIndex: "requester", width: 90 },
