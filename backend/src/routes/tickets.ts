@@ -3,9 +3,15 @@ import dayjs from "dayjs";
 import { store } from "../store";
 import { applyFilters, parseQuery } from "../filter";
 import { dedupe } from "../mapping";
+import { computeCardStats } from "../cards";
 import { ChangeLogEntry } from "../types";
 
 const router = Router();
+
+// 工单中心统计卡片数据，需在 "/:id" 之前注册，避免被当成 id 参数捕获
+router.get("/card-stats", (req, res) => {
+  res.json({ data: computeCardStats(store.tickets) });
+});
 
 router.get("/", (req, res) => {
   const q = parseQuery(req.query as Record<string, unknown>);

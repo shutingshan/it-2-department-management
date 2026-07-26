@@ -267,7 +267,7 @@ export function genTicket(year: number, seqInYear: number, submittedAt: dayjs.Da
     status,
     devStatus,
     urgent: rand() > 0.85,
-    priority: pick(["High", "Middle", "Low"]),
+    priority: pick(["High High", "High", "Middle", "Low"]),
     isReturned: rand() > 0.9,
     monthlyPlan,
     iterations,
@@ -303,6 +303,21 @@ export function generateTickets(): Ticket[] {
       tickets.push(genTicket(year, seq, submittedAt));
     }
   }
+
+  // "待补充资料"（人工手动切换）与"已排期"（迭代已定但未开发）暂无法从当前状态分布自动推导，
+  // 先挑几张未完成的工单直接置为对应阶段，方便本地演示卡片效果；
+  // 等状态/tapd状态完整映射规则确定后，这里会替换成真正的推导逻辑。
+  const openTickets = tickets.filter((t) => t.stage !== "已完成" && t.stage !== "关闭");
+  pickMany(openTickets, 4).forEach((t) => {
+    t.stage = "待补充资料";
+  });
+  pickMany(
+    openTickets.filter((t) => t.stage !== "待补充资料"),
+    4
+  ).forEach((t) => {
+    t.stage = "已排期";
+  });
+
   return tickets;
 }
 

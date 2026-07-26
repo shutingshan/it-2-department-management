@@ -31,7 +31,16 @@ export type TicketStatus =
   | "已完成"
   | "关闭";
 
-export type TicketStage = "待排期" | "方案梳理" | "开发中" | "测试验收中" | "已完成" | "关闭";
+export type TicketStage =
+  | "待分配"
+  | "待补充资料"
+  | "方案梳理"
+  | "待排期"
+  | "已排期"
+  | "开发中"
+  | "测试验收"
+  | "已完成"
+  | "关闭";
 
 export interface IterationRef {
   name: string;
@@ -147,10 +156,13 @@ export function hoursDeviation(t: Pick<Ticket, "estimatedHours" | "actualHours">
 }
 
 export const STAGE_COLORS: Record<TicketStage, string> = {
-  待排期: "default",
+  待分配: "default",
+  待补充资料: "orange",
   方案梳理: "gold",
+  待排期: "default",
+  已排期: "cyan",
   开发中: "blue",
-  测试验收中: "purple",
+  测试验收: "purple",
   已完成: "green",
   关闭: "default",
 };

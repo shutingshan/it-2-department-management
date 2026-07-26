@@ -1,0 +1,105 @@
+.stat-cards-row {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  overflow-x: auto;
+}
+
+.stat-card {
+  flex: 1 1 0;
+  min-width: 88px;
+  background: #fff;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.stat-card:hover {
+  border-color: #2f54eb;
+  box-shadow: 0 2px 8px rgba(47, 84, 235, 0.12);
+}
+
+.stat-card.active {
+  border-color: #2f54eb;
+  background: #f0f3ff;
+}
+
+.stat-card-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #595959;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stat-card-help {
+  color: #bfbfbf;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.stat-card-count {
+  font-size: 20px;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.4;
+}
+
+.stat-card-count.red {
+  color: #f5222d;
+}
+
+.stat-card-children {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed rgba(17, 24, 39, 0.08);
+}
+
+.stat-card-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: #8c8c8c;
+  border-radius: 4px;
+  padding: 1px 3px;
+}
+
+.stat-card-child:hover {
+  background: #f0f2ff;
+  color: #2f54eb;
+}
+
+.stat-card-child.active {
+  background: #eef2ff;
+  color: #2f54eb;
+  font-weight: 600;
+}
+
+.stat-card-child-label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stat-card-child-count {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.stat-card-child-count.red {
+  color: #f5222d;
+}

@@ -10,6 +10,7 @@ import { useTickets } from "./useTickets";
 import type { TicketFilters } from "./useTickets";
 import FilterBar from "./FilterBar";
 import DetailDrawer from "./DetailDrawer";
+import StatCards from "./StatCards";
 import "./TicketCenter.css";
 
 export default function TicketCenter() {
@@ -171,6 +172,15 @@ export default function TicketCenter() {
 
   return (
     <div className="ticket-center-page">
+      <StatCards
+        activeCardKey={filters.cardKey}
+        refreshKey={refreshTick}
+        onSelect={(cardKey) => {
+          setFilters({ sortField: "submittedAt", sortOrder: "desc", cardKey });
+          setPage(1);
+        }}
+      />
+
       <FilterBar filters={filters} onChange={setFilters} facets={facets} />
 
       <div className="tc-table-card">
