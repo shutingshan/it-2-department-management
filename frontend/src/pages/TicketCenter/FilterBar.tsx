@@ -1,6 +1,23 @@
-import { DatePicker, Input, Select, Space, Switch, Button } from "antd";
+import { DatePicker, Input, Select, Space, Button } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import type { Facets, TicketFilters } from "./useTickets";
+
+const YES_NO_OPTIONS = [
+  { value: "yes", label: "是" },
+  { value: "no", label: "否" },
+];
+
+// 是/否类多选框只有单一有效取值：两个都选或都不选时等同于不筛选
+function yesNoValueToBool(v: string[]): boolean | undefined {
+  if (v.includes("yes") && !v.includes("no")) return true;
+  if (v.includes("no") && !v.includes("yes")) return false;
+  return undefined;
+}
+function boolToYesNoValue(v: boolean | undefined): string[] {
+  if (v === true) return ["yes"];
+  if (v === false) return ["no"];
+  return [];
+}
 
 const { RangePicker } = DatePicker;
 
@@ -100,30 +117,58 @@ export default function FilterBar({
           maxTagCount={1}
         />
         <Select
+          mode="multiple"
           allowClear
           placeholder="发起人"
-          style={{ minWidth: 110 }}
+          style={{ minWidth: 130 }}
           showSearch
           options={facets.requesters.map((v) => ({ value: v, label: v }))}
-          value={filters.requester?.[0]}
-          onChange={(v) => set("requester", v ? [v] : undefined)}
+          value={filters.requester}
+          onChange={(v) => set("requester", v.length ? v : undefined)}
+          maxTagCount={1}
         />
         <Select
+          mode="multiple"
+          allowClear
+          placeholder="关注人"
+          style={{ minWidth: 130 }}
+          showSearch
+          options={facets.watchers.map((v) => ({ value: v, label: v }))}
+          value={filters.watcher}
+          onChange={(v) => set("watcher", v.length ? v : undefined)}
+          maxTagCount={1}
+        />
+        <Select
+          mode="multiple"
           allowClear
           placeholder="归属应用"
-          style={{ minWidth: 110 }}
+          style={{ minWidth: 130 }}
           showSearch
           options={facets.owningApps.map((v) => ({ value: v, label: v }))}
-          value={filters.owningApp?.[0]}
-          onChange={(v) => set("owningApp", v ? [v] : undefined)}
+          value={filters.owningApp}
+          onChange={(v) => set("owningApp", v.length ? v : undefined)}
+          maxTagCount={1}
         />
-        <Space size={4}>
-          <span style={{ fontSize: 13, color: "#595959" }}>紧急</span>
-          <Switch
-            checked={filters.urgent === true}
-            onChange={(checked) => set("urgent", checked ? true : undefined)}
-          />
-        </Space>
+        <Select
+          mode="multiple"
+          allowClear
+          placeholder="紧急"
+          style={{ minWidth: 100 }}
+          options={YES_NO_OPTIONS}
+          value={boolToYesNoValue(filters.urgent)}
+          onChange={(v) => set("urgent", yesNoValueToBool(v))}
+          maxTagCount={1}
+        />
+        <Select
+          mode="multiple"
+          allowClear
+          placeholder="是否有TAPD地址"
+          style={{ minWidth: 130 }}
+          options={YES_NO_OPTIONS}
+          value={boolToYesNoValue(filters.hasTapd)}
+          onChange={(v) => set("hasTapd", yesNoValueToBool(v))}
+          maxTagCount={1}
+        />
         <Button onClick={clearAll}>清除筛选</Button>
       </Space>
     </div>

@@ -83,6 +83,7 @@ export interface Ticket {
   requester: string;
   requesterPinyin: string;
   requesterDept: string;
+  watcher: string[];
   currentHandler: string;
   itHandler: string;
   developer: string[];

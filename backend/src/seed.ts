@@ -141,6 +141,10 @@ function makeIteration(afterDate: dayjs.Dayjs, idx: number): IterationRef {
 export function genTicket(year: number, seqInYear: number, submittedAt: dayjs.Dayjs): Ticket {
   const code = `GD${year}${String(seqInYear).padStart(6, "0")}`;
   const requester = pick(REQUESTERS);
+  const watcher = pickMany(
+    REQUESTERS.filter((u) => u.id !== requester.id),
+    randInt(0, 2)
+  ).map((u) => u.name);
   const itHandler = pick(IT_HANDLERS);
   const category = pick(CATEGORIES);
   const owningApp = pick(OWNING_APPS);
@@ -260,6 +264,7 @@ export function genTicket(year: number, seqInYear: number, submittedAt: dayjs.Da
     requester: requester.name,
     requesterPinyin: requester.pinyin,
     requesterDept: requester.departmentId,
+    watcher,
     currentHandler,
     itHandler: itHandler.name,
     developer,

@@ -77,6 +77,7 @@ export function mapScrapedRowToTicket(row: ScrapedRow, existing?: Ticket): Ticke
     requester: row["发起人"]?.trim() || "",
     requesterPinyin: existing?.requesterPinyin ?? "",
     requesterDept: row["所属部门"]?.trim() || "",
+    watcher: existing?.watcher ?? [],
     currentHandler: developer[0] ?? handler,
     itHandler: handler,
     developer,

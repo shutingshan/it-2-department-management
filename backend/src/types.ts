@@ -96,6 +96,7 @@ export interface Ticket {
   requester: string; // 发起人
   requesterPinyin: string;
   requesterDept: string; // 发起部门 (department id)
+  watcher: string[]; // 关注人
   currentHandler: string; // 当前处理人
   itHandler: string; // IT 受理人
   developer: string[]; // 开发人员（去重）

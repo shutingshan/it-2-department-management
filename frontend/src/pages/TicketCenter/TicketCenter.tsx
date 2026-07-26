@@ -15,7 +15,6 @@ import {
 import {
   AppstoreOutlined,
   CopyOutlined,
-  DownloadOutlined,
   ExportOutlined,
   ReloadOutlined,
   UnorderedListOutlined,
@@ -49,9 +48,9 @@ export default function TicketCenter() {
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
   const [batchTransferOpen, setBatchTransferOpen] = useState(false);
   const [localRefresh, setLocalRefresh] = useState(0);
+  const [lastUpdateTime, setLastUpdateTime] = useState("");
 
   // 支持从头部"我负责的工单"等入口重复导航到 /tickets 时，也能重新应用筛选条件
   useEffect(() => {
@@ -66,6 +65,11 @@ export default function TicketCenter() {
   useEffect(() => {
     publishFilters(filters);
   }, [filters, publishFilters]);
+
+  // 工单同步时间：记录上一次"更新工单"逻辑处理完成的时间
+  useEffect(() => {
+    api.get("/sync/status").then((res) => setLastUpdateTime(res.data.lastUpdateTime));
+  }, [refreshTick, localRefresh]);
 
   const { data, total, facets, loading, reload } = useTickets(
     filters,
@@ -91,15 +95,14 @@ export default function TicketCenter() {
     reload();
   }
 
-  async function handleExport(groupBy?: "requester" | "itHandler") {
-    const res = await api.post("/export", { ...filters, groupBy }, { responseType: "blob" });
+  async function handleExport() {
+    const res = await api.post("/export", filters, { responseType: "blob" });
     const url = URL.createObjectURL(res.data);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "工单导出.zip";
+    a.download = "IT二部工单数据.zip";
     a.click();
     URL.revokeObjectURL(url);
-    setExportOpen(false);
   }
 
   const columns: ColumnsType<Ticket> = [
@@ -236,11 +239,14 @@ export default function TicketCenter() {
           >
             批量转交（{selectedKeys.length}）
           </Button>
-          <Button icon={<ExportOutlined />} onClick={() => setExportOpen(true)}>
+          <Button icon={<ExportOutlined />} onClick={handleExport}>
             导出
           </Button>
         </Space>
-        <Space>
+        <Space size={16}>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            工单同步时间：{lastUpdateTime || "-"}
+          </Typography.Text>
           <Button icon={<ReloadOutlined />} onClick={() => setLocalRefresh((x) => x + 1)} />
           <Radio.Group value={view} onChange={(e) => setView(e.target.value)}>
             <Radio.Button value="list">
@@ -328,26 +334,6 @@ export default function TicketCenter() {
         onClose={() => setDetailOpen(false)}
         onSaved={reload}
       />
-
-      <Modal
-        title="导出工单"
-        open={exportOpen}
-        onCancel={() => setExportOpen(false)}
-        footer={null}
-      >
-        <p>导出将按当前列表筛选条件生成 Excel（真实 xlsx），多文件将自动打包为压缩包。</p>
-        <Space direction="vertical" style={{ width: "100%" }}>
-          <Button block icon={<DownloadOutlined />} onClick={() => handleExport()}>
-            按当前筛选导出（单文件）
-          </Button>
-          <Button block icon={<DownloadOutlined />} onClick={() => handleExport("requester")}>
-            按发起人导出（每人一个文件）
-          </Button>
-          <Button block icon={<DownloadOutlined />} onClick={() => handleExport("itHandler")}>
-            按 IT 受理人导出（每人一个文件）
-          </Button>
-        </Space>
-      </Modal>
 
       <BatchTransferModal
         open={batchTransferOpen}
