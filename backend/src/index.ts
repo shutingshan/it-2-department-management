@@ -15,6 +15,7 @@ import logsRouter from "./routes/logs";
 import changeLogsRouter from "./routes/changeLogs";
 import exportRouter from "./routes/export";
 import { runScheduledSyncChain, startScheduler } from "./scheduler";
+import { store } from "./store";
 
 const app = express();
 const PORT = process.env.PORT ?? 4000;
@@ -58,3 +59,14 @@ app.listen(PORT, () => {
 });
 
 startScheduler();
+
+// 工单/站内信/日志现在是真实数据，不能只留在内存里：定时落盘，
+// 并在进程正常退出（含 ts-node-dev 检测到文件变化触发的重启）前再落盘一次，尽量减少数据丢失窗口
+const autosaveTimer = setInterval(() => store.save(), 5000);
+function saveAndExit() {
+  clearInterval(autosaveTimer);
+  store.save();
+  process.exit(0);
+}
+process.on("SIGINT", saveAndExit);
+process.on("SIGTERM", saveAndExit);

@@ -11,3 +11,4 @@ frontend/dist/
 backend/dist/
 backend/.auth/
 backend/.env.local
+backend/data/
