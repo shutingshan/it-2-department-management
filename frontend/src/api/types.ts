@@ -168,6 +168,15 @@ export function hoursDeviation(t: Pick<Ticket, "estimatedHours" | "actualHours">
   return Number((t.actualHours - t.estimatedHours).toFixed(1));
 }
 
+// TAPD 迭代字段可能带有"（当前迭代）"后缀（如 260710～260712（当前迭代）），展示前需先截掉再去重
+export function stripCurrentIterationTag(name: string): string {
+  return name.replace(/[（(]当前迭代[）)]/g, "").trim();
+}
+
+export function formatIterations(refs: Pick<IterationRef, "name">[]): string {
+  return Array.from(new Set(refs.map((i) => stripCurrentIterationTag(i.name)).filter(Boolean))).join("、") || "-";
+}
+
 export const STAGE_COLORS: Record<TicketStage, string> = {
   待分配: "default",
   待补充资料: "orange",

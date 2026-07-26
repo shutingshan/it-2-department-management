@@ -13,7 +13,7 @@ import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
 import { arrayMove, horizontalListSortingStrategy, SortableContext } from "@dnd-kit/sortable";
 import { useLocation, useOutletContext } from "react-router-dom";
 import { api } from "../../api/client";
-import { hoursDeviation, STAGE_COLORS } from "../../api/types";
+import { formatIterations, hoursDeviation, STAGE_COLORS } from "../../api/types";
 import type { Ticket } from "../../api/types";
 import { useAuthStore } from "../../store/auth";
 import { useFilteredTicketsStore } from "../../store/filteredTickets";
@@ -306,7 +306,7 @@ export default function TicketCenter() {
         dataIndex: "iterations",
         width: 110,
         ellipsis: true,
-        render: (v: Ticket["iterations"]) => v.map((i) => i.name).join("、") || "-",
+        render: (v: Ticket["iterations"]) => formatIterations(v),
       },
       expectedTriageTime: { title: "预计梳理完成时间", dataIndex: "expectedTriageTime", width: 120, render: (v: string | null) => v ?? "-" },
       actualTriageTime: { title: "实际梳理完成时间", dataIndex: "actualTriageTime", width: 120, render: (v: string | null) => v ?? "-" },
@@ -402,7 +402,6 @@ export default function TicketCenter() {
               pagination={false}
               sticky
               scroll={{ x: 2600, y: "calc(100vh - 420px)" }}
-              rowClassName={(r) => (r.urgent ? "row-urgent" : "")}
               components={{ header: { cell: DraggableHeaderCell } }}
               onChange={(_, __, sorter: any) => {
                 if (sorter?.field) {

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Button, Descriptions, Input, Modal, Space, Switch, Table, Tag, Timeline, Typography, message } from "antd";
 import { CopyOutlined, LinkOutlined } from "@ant-design/icons";
 import { api } from "../../api/client";
-import { hoursDeviation, STAGE_COLORS } from "../../api/types";
+import { formatIterations, hoursDeviation, STAGE_COLORS } from "../../api/types";
 import type { Ticket } from "../../api/types";
 import { useAuthStore } from "../../store/auth";
 
@@ -140,9 +140,7 @@ export default function DetailModal({
             </Descriptions.Item>
             <Descriptions.Item label="优先级">{ticket.priority ?? "-"}</Descriptions.Item>
             <Descriptions.Item label="月度计划">{ticket.monthlyPlan.join("、") || "-"}</Descriptions.Item>
-            <Descriptions.Item label="迭代">
-              {ticket.iterations.map((i) => i.name).join("、") || "-"}
-            </Descriptions.Item>
+            <Descriptions.Item label="迭代">{formatIterations(ticket.iterations)}</Descriptions.Item>
             <Descriptions.Item label="预计梳理完成时间">{ticket.expectedTriageTime ?? "-"}</Descriptions.Item>
             <Descriptions.Item label="实际梳理完成时间">{ticket.actualTriageTime ?? "-"}</Descriptions.Item>
             <Descriptions.Item label="预计完成时间">{ticket.expectedCompleteTime ?? "-"}</Descriptions.Item>

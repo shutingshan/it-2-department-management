@@ -131,12 +131,17 @@ function randomContent() {
   return pick(CONTENT_POOL);
 }
 
+const TODAY = dayjs("2026-07-24");
+
 function makeIteration(afterDate: dayjs.Dayjs, idx: number): IterationRef {
   const start = afterDate.add(idx * 14, "day");
   const end = start.add(13, "day");
   const dayOfYear = start.diff(dayjs(`${start.format("YYYY")}-01-01`), "day") + 1;
+  const name = `${start.format("YYYY")}-${String(Math.ceil(dayOfYear / 14)).padStart(2, "0")}迭代`;
+  // TAPD 原始迭代字段：进行中的迭代会带"（当前迭代）"后缀，展示/筛选前需截掉
+  const isCurrent = !TODAY.isBefore(start) && !TODAY.isAfter(end);
   return {
-    name: `${start.format("YYYY")}-${String(Math.ceil(dayOfYear / 14)).padStart(2, "0")}迭代`,
+    name: isCurrent ? `${name}（当前迭代）` : name,
     start: start.format("YYYY-MM-DD"),
     end: end.format("YYYY-MM-DD"),
   };

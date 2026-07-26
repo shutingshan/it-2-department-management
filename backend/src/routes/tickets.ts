@@ -2,7 +2,7 @@ import { Router } from "express";
 import dayjs from "dayjs";
 import { store } from "../store";
 import { applyFilters, parseQuery } from "../filter";
-import { dedupe } from "../mapping";
+import { dedupe, stripCurrentIterationTag } from "../mapping";
 import { computeCardStats } from "../cards";
 import { ChangeLogEntry } from "../types";
 
@@ -29,7 +29,7 @@ router.get("/", (req, res) => {
     itHandlers: dedupe(filtered.map((t) => t.itHandler)).sort(),
     developers: dedupe(filtered.flatMap((t) => t.developer)).sort(),
     monthlyPlans: dedupe(filtered.flatMap((t) => t.monthlyPlan)).sort(),
-    iterations: dedupe(filtered.flatMap((t) => t.iterations.map((i) => i.name))).sort(),
+    iterations: dedupe(filtered.flatMap((t) => t.iterations.map((i) => stripCurrentIterationTag(i.name)))).sort(),
     owningApps: dedupe(filtered.map((t) => t.owningApp)).sort(),
   };
 

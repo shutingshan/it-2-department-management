@@ -1,6 +1,7 @@
 import dayjs from "dayjs";
 import { Ticket } from "./types";
 import { filterByCard } from "./cards";
+import { stripCurrentIterationTag } from "./mapping";
 
 export interface TicketQuery {
   search?: string;
@@ -81,7 +82,9 @@ export function applyFilters(tickets: Ticket[], q: TicketQuery): Ticket[] {
   if (q.monthlyPlan?.length)
     result = result.filter((t) => t.monthlyPlan.some((m) => q.monthlyPlan!.includes(m)));
   if (q.iteration?.length)
-    result = result.filter((t) => t.iterations.some((i) => q.iteration!.includes(i.name)));
+    result = result.filter((t) =>
+      t.iterations.some((i) => q.iteration!.includes(stripCurrentIterationTag(i.name)))
+    );
   if (q.owningApp?.length) result = result.filter((t) => q.owningApp!.includes(t.owningApp));
   if (q.requesterDept?.length) result = result.filter((t) => q.requesterDept!.includes(t.requesterDept));
   if (q.requester?.length) result = result.filter((t) => q.requester!.includes(t.requester));

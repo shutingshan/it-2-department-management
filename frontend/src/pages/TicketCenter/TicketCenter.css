@@ -98,10 +98,6 @@
   color: #8c8c8c;
 }
 
-.row-urgent {
-  background: #fff1f0;
-}
-
 .tc-table-card .ant-table-thead > tr > th {
   position: relative;
   background-clip: padding-box;
