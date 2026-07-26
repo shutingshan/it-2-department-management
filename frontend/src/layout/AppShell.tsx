@@ -32,6 +32,7 @@ export default function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const [refreshTick, setRefreshTick] = useState(0);
+  const [collapsed, setCollapsed] = useState(false);
 
   if (!user) {
     return <Navigate to="/login" replace />;
@@ -56,10 +57,18 @@ export default function AppShell() {
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
-      <Sider theme="light" width={188} className="app-sider">
+      <Sider
+        theme="light"
+        width={188}
+        collapsedWidth={64}
+        collapsible
+        collapsed={collapsed}
+        onCollapse={setCollapsed}
+        className="app-sider"
+      >
         <div className="app-logo">
           <span className="app-logo-badge">IT</span>
-          <span className="app-logo-text">二部工单中心</span>
+          {!collapsed && <span className="app-logo-text">二部工单中心</span>}
         </div>
         <Menu
           theme="light"
