@@ -45,21 +45,6 @@
   font-weight: 600;
 }
 
-.floating-actions {
-  position: fixed;
-  right: 18px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  z-index: 50;
-}
-
-.floating-actions .ant-btn {
-  writing-mode: horizontal-tb;
-}
-
 .kanban-board {
   display: flex;
   gap: 12px;
