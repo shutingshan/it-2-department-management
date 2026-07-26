@@ -45,10 +45,8 @@ export default function TicketCenter() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [view, setView] = useState<"list" | "kanban">("list");
-  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [batchTransferOpen, setBatchTransferOpen] = useState(false);
   const [localRefresh, setLocalRefresh] = useState(0);
   const [lastUpdateTime, setLastUpdateTime] = useState("");
 
@@ -233,12 +231,6 @@ export default function TicketCenter() {
     <div className="ticket-center-page">
       <div className="tc-toolbar">
         <Space>
-          <Button
-            disabled={selectedKeys.length === 0}
-            onClick={() => setBatchTransferOpen(true)}
-          >
-            批量转交（{selectedKeys.length}）
-          </Button>
           <Button icon={<ExportOutlined />} onClick={handleExport}>
             导出
           </Button>
@@ -272,10 +264,6 @@ export default function TicketCenter() {
               columns={columns}
               pagination={false}
               scroll={{ x: 2400, y: "calc(100vh - 420px)" }}
-              rowSelection={{
-                selectedRowKeys: selectedKeys,
-                onChange: setSelectedKeys,
-              }}
               rowClassName={(r) => (r.urgent ? "row-urgent" : "")}
               onChange={(_, __, sorter: any) => {
                 if (sorter?.field) {
@@ -334,22 +322,6 @@ export default function TicketCenter() {
         onClose={() => setDetailOpen(false)}
         onSaved={reload}
       />
-
-      <BatchTransferModal
-        open={batchTransferOpen}
-        onClose={() => setBatchTransferOpen(false)}
-        handlers={facets.itHandlers}
-        onConfirm={async (target) => {
-          if (!user) return;
-          await Promise.all(
-            selectedKeys.map((id) => api.post(`/tickets/${id}/transfer`, { actor: user.name, to: target }))
-          );
-          message.success(`已批量转交 ${selectedKeys.length} 条工单`);
-          setSelectedKeys([]);
-          setBatchTransferOpen(false);
-          reload();
-        }}
-      />
     </div>
   );
 }
@@ -391,30 +363,5 @@ function TransferAction({
         />
       </Modal>
     </>
-  );
-}
-
-function BatchTransferModal({
-  open,
-  onClose,
-  handlers,
-  onConfirm,
-}: {
-  open: boolean;
-  onClose: () => void;
-  handlers: string[];
-  onConfirm: (target: string) => void;
-}) {
-  const [target, setTarget] = useState<string>();
-  return (
-    <Modal title="批量转交" open={open} onCancel={onClose} onOk={() => target && onConfirm(target)}>
-      <Select
-        style={{ width: "100%" }}
-        placeholder="选择接收人"
-        options={handlers.map((h) => ({ value: h, label: h }))}
-        value={target}
-        onChange={setTarget}
-      />
-    </Modal>
   );
 }

@@ -69,13 +69,6 @@ export default function FilterBar({
           value={filters.search}
           onChange={(e) => set("search", e.target.value || undefined)}
         />
-        <RangePicker
-          placeholder={["提交时间起", "提交时间止"]}
-          onChange={(vals) => {
-            set("submittedFrom", vals?.[0] ? vals[0].format("YYYY-MM-DD") : undefined);
-            set("submittedTo", vals?.[1] ? vals[1].format("YYYY-MM-DD 23:59") : undefined);
-          }}
-        />
         <Select
           mode="multiple"
           allowClear
@@ -168,6 +161,13 @@ export default function FilterBar({
           value={boolToYesNoValue(filters.hasTapd)}
           onChange={(v) => set("hasTapd", yesNoValueToBool(v))}
           maxTagCount={1}
+        />
+        <RangePicker
+          placeholder={["提交时间起", "提交时间止"]}
+          onChange={(vals) => {
+            set("submittedFrom", vals?.[0] ? vals[0].format("YYYY-MM-DD") : undefined);
+            set("submittedTo", vals?.[1] ? vals[1].format("YYYY-MM-DD 23:59") : undefined);
+          }}
         />
         <Button onClick={clearAll}>清除筛选</Button>
       </Space>
