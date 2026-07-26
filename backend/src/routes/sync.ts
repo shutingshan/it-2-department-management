@@ -83,9 +83,17 @@ export function applyScrapedRows(rows: ScrapedRow[], isFull: boolean) {
   return { addedCount, updatedCount, failedCount, failReasons };
 }
 
+// 获取新工单没有进度轮询的 job 机制，容易在等待时间变长后被误以为"没反应"而重复点击，
+// 导致两次抓取同时跑、共用同一份浏览器登录态文件互相干扰；这里用一个模块级标记防止并发执行
+let fetchNewRunning = false;
+
 // 获取新工单：供路由与定时任务共用；失败时已在此处记录变更日志并向上抛出。
 // 完成后会把结果写入 store.currentJob（type: fetch_new），供前端沿用既有的悬浮进度弹窗展示
 export async function runFetchNew(actor: string, mode?: "incremental" | "full") {
+  if (fetchNewRunning) {
+    throw new Error("已有获取新工单任务在执行中，请等待其完成后再试");
+  }
+  fetchNewRunning = true;
   const isFull = mode === "full";
   const startedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
   try {
@@ -131,6 +139,8 @@ export async function runFetchNew(actor: string, mode?: "incremental" | "full") 
       detail: "获取新工单失败",
     });
     throw e;
+  } finally {
+    fetchNewRunning = false;
   }
 }
 

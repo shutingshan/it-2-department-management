@@ -20,13 +20,20 @@ export interface ScrapeResult {
 
 type Locatable = Page | Frame;
 
+// 首屏冷启动超时（微前端首次加载几十个远程 chunk，观察到偏慢，放宽到 4 分钟）
+const FIRST_PAGE_TIMEOUT_MS = 240000;
+// 翻页超时：应用已经加载完成，翻页只是同一个已挂载模块内部重新请求/渲染数据，
+// 不需要再等首屏那么久；等太久反而会让"获取新工单"这个同步 HTTP 请求整体超时更容易被
+// 客户端提前放弃，与并发锁互相踩踏，所以单独给一个短得多的超时
+const PAGINATION_TIMEOUT_MS = 30000;
+
 // 当曲云是微前端架构（主壳先渲染出来，工单列表本身由独立的远程模块异步加载挂载进来），
 // 首屏渲染出来时列表模块可能压根还没开始渲染，此时既没有文字也没有 antd 的加载中转圈（class
 // 带 spin-spinning），"没转圈=已加载完成"的判断会误判。所以不区分"等转圈消失"和"抓取"两步，
-// 而是直接反复尝试抓取，抓到数据或者彻底超时（4分钟）才停止
+// 而是直接反复尝试抓取，抓到数据或者彻底超时才停止
 async function waitForFirstPageData(
   targets: Locatable[],
-  timeoutMs = 240000
+  timeoutMs: number
 ): Promise<{ rows: ScrapedRow[]; strategy: ExtractStrategy } | null> {
   const deadline = Date.now() + timeoutMs;
   let lastAttempt: { rows: ScrapedRow[]; strategy: ExtractStrategy } | null = null;
@@ -164,7 +171,7 @@ export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
     // 所以要连同页面里所有 iframe 一起找，而不只是主页面
     const targets: Locatable[] = [page, ...page.frames()];
 
-    const firstPage = await waitForFirstPageData(targets);
+    const firstPage = await waitForFirstPageData(targets, FIRST_PAGE_TIMEOUT_MS);
     if (!firstPage) {
       // 三种常见结构在主页面和所有 iframe 里都没找到：保存现场，方便针对实际页面结构调整选择器
       fs.mkdirSync(DEBUG_DIR, { recursive: true });
@@ -196,7 +203,7 @@ export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
       const moved = await goToNextPage(targets);
       if (!moved) break;
 
-      const next = await waitForFirstPageData(targets);
+      const next = await waitForFirstPageData(targets, PAGINATION_TIMEOUT_MS);
       if (!next || next.rows.length === 0) break; // 翻页后抓不到数据了，停止，避免死循环
       allRows.push(...next.rows);
       pageCount += 1;
