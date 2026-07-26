@@ -92,7 +92,10 @@ export function mapScrapedRowToTicket(row: ScrapedRow, existing?: Ticket): Ticke
     monthlyPlan: existing?.monthlyPlan ?? [],
     iterations,
     expectedTriageTime: emptyToNull(row["预计梳理完成"]),
-    actualTriageTime: existing?.actualTriageTime ?? null,
+    // "实际梳理完成"跟"预计梳理完成"一样是列表里的列（而不需要打开详情页的考核信息 tab才能看到），
+    // 直接从抓取行里取；如果实际列表里这一列的表头文字不是这个，就会一直取不到值，
+    // 需要对照真实页面表头文字核实调整
+    actualTriageTime: emptyToNull(row["实际梳理完成"]) ?? existing?.actualTriageTime ?? null,
     expectedCompleteTime,
     actualCompleteTime,
     estimatedHours: existing?.estimatedHours ?? 0,

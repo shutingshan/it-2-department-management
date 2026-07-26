@@ -24,8 +24,8 @@ type Locatable = Page | Frame;
 const FIRST_PAGE_TIMEOUT_MS = 240000;
 // 翻页超时：应用已经加载完成，翻页只是同一个已挂载模块内部重新请求/渲染数据，
 // 不需要再等首屏那么久；等太久反而会让"获取新工单"这个同步 HTTP 请求整体超时更容易被
-// 客户端提前放弃，与并发锁互相踩踏，所以单独给一个短得多的超时
-const PAGINATION_TIMEOUT_MS = 30000;
+// 客户端提前放弃，与并发锁互相踩踏，所以单独给一个短得多的超时（但要给下面的滚动加载留够时间）
+const PAGINATION_TIMEOUT_MS = 60000;
 
 // 当曲云是微前端架构（主壳先渲染出来，工单列表本身由独立的远程模块异步加载挂载进来），
 // 首屏渲染出来时列表模块可能压根还没开始渲染，此时既没有文字也没有 antd 的加载中转圈（class
@@ -45,13 +45,58 @@ async function waitForFirstPageData(
   return lastAttempt;
 }
 
+// 当曲云表格是虚拟滚动列表：一页最多 200 条，但同一时刻 DOM 里只渲染视口内的那一小部分行，
+// 必须不断把表格滚动到底部触发懒加载，直到渲染出的行数不再增长（连续几次都一样）才算真正
+// 拿到本页全部数据，否则只会抓到滚动条顶部那几十条
+async function scrollGridToLoadAll(
+  target: Locatable,
+  rowSelector: string,
+  timeoutMs = 20000
+): Promise<number> {
+  const rowLocator = target.locator(rowSelector);
+  const deadline = Date.now() + timeoutMs;
+  let lastCount = await rowLocator.count();
+  let stableRounds = 0;
+  while (Date.now() < deadline && stableRounds < 3) {
+    await target
+      .evaluate((selector) => {
+        const row = document.querySelector(selector);
+        if (!row) return;
+        let el: HTMLElement | null = row as HTMLElement;
+        while (el && el !== document.body) {
+          const style = getComputedStyle(el);
+          if ((style.overflowY === "auto" || style.overflowY === "scroll") && el.scrollHeight > el.clientHeight + 10) {
+            el.scrollTop = el.scrollHeight;
+            return;
+          }
+          el = el.parentElement;
+        }
+        window.scrollTo(0, document.body.scrollHeight);
+      }, rowSelector)
+      .catch(() => {});
+    await new Promise((r) => setTimeout(r, 500));
+    const count = await rowLocator.count();
+    if (count === lastCount) {
+      stableRounds += 1;
+    } else {
+      stableRounds = 0;
+      lastCount = count;
+    }
+  }
+  return lastCount;
+}
+
 // 当曲云（lumi 自研表格组件）的实际结构：既不是原生 table，也没有标准 ARIA role，
 // 而是每一行用 data-row-item="true" 标记、每个单元格用 data-columnitem 标记；
 // class 名带编译哈希（如 columnItemHeaderTitle___3CMa-）会变，属性选择器更稳定
 async function extractFromDangquyunGrid(target: Locatable): Promise<ScrapedRow[] | null> {
-  const rowLocator = target.locator('[data-row-item="true"]');
-  const rowCount = await rowLocator.count();
+  const rowSelector = '[data-row-item="true"]';
+  const rowLocator = target.locator(rowSelector);
+  let rowCount = await rowLocator.count();
   if (rowCount === 0) return null;
+
+  // 已经渲染出至少一行，说明表格已经挂载好了，接下来滚动到底部把本页剩余的行也加载出来
+  rowCount = await scrollGridToLoadAll(target, rowSelector);
 
   const headers = await target.locator('[class*="columnItemHeaderTitle"] [class*="titleSpanTitle"]').allTextContents();
 
