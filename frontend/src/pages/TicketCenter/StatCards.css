@@ -17,6 +17,18 @@
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
+.stat-card-narrow {
+  flex: 0 0 72px;
+  min-width: 72px;
+}
+
+.stat-card-narrow .stat-card-head {
+  align-items: flex-start;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+}
+
 .stat-card:hover {
   border-color: #2f54eb;
   box-shadow: 0 2px 8px rgba(47, 84, 235, 0.12);

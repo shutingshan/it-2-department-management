@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { DatePicker, Input, Select, Space, Button } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import type { Facets, TicketFilters } from "./useTickets";
@@ -55,10 +56,14 @@ export default function FilterBar({
   filters,
   onChange,
   facets,
+  extra,
+  rightExtra,
 }: {
   filters: TicketFilters;
   onChange: (f: TicketFilters) => void;
   facets: Facets;
+  extra?: ReactNode;
+  rightExtra?: ReactNode;
 }) {
   function set<K extends keyof TicketFilters>(key: K, value: TicketFilters[K]) {
     onChange({ ...filters, [key]: value });
@@ -70,7 +75,7 @@ export default function FilterBar({
 
   return (
     <div className="filter-bar">
-      <Space wrap size={[8, 8]}>
+      <Space wrap size={[8, 8]} className="filter-bar-controls">
         <Input
           allowClear
           style={{ width: 260 }}
@@ -93,7 +98,7 @@ export default function FilterBar({
           mode="multiple"
           allowClear
           placeholder="状态"
-          style={{ minWidth: 120 }}
+          style={{ minWidth: 90 }}
           options={STATUS_OPTIONS}
           value={filters.status}
           onChange={(v) => set("status", v.length ? v : undefined)}
@@ -123,7 +128,7 @@ export default function FilterBar({
           mode="multiple"
           allowClear
           placeholder="发起人"
-          style={{ minWidth: 130 }}
+          style={{ minWidth: 90 }}
           showSearch
           options={facets.requesters.map((v) => ({ value: v, label: v }))}
           value={filters.requester}
@@ -134,7 +139,7 @@ export default function FilterBar({
           mode="multiple"
           allowClear
           placeholder="关注人"
-          style={{ minWidth: 130 }}
+          style={{ minWidth: 90 }}
           showSearch
           options={facets.watchers.map((v) => ({ value: v, label: v }))}
           value={filters.watcher}
@@ -156,7 +161,7 @@ export default function FilterBar({
           mode="multiple"
           allowClear
           placeholder="紧急"
-          style={{ minWidth: 100 }}
+          style={{ minWidth: 80 }}
           options={YES_NO_OPTIONS}
           value={boolToYesNoValue(filters.urgent)}
           onChange={(v) => set("urgent", yesNoValueToBool(v))}
@@ -180,7 +185,9 @@ export default function FilterBar({
           }}
         />
         <Button onClick={clearAll}>清除筛选</Button>
+        {extra}
       </Space>
+      {rightExtra && <div className="filter-bar-right">{rightExtra}</div>}
     </div>
   );
 }

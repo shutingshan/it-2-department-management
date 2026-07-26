@@ -189,17 +189,6 @@ export default function TicketCenter() {
 
   return (
     <div className="ticket-center-page">
-      <div className="tc-toolbar">
-        <Space>
-          <Button icon={<ExportOutlined />} onClick={handleExport}>
-            导出
-          </Button>
-        </Space>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          工单同步时间：{lastUpdateTime || "-"}
-        </Typography.Text>
-      </div>
-
       <StatCards
         activeCardKey={filters.cardKey}
         refreshKey={refreshTick}
@@ -209,7 +198,21 @@ export default function TicketCenter() {
         }}
       />
 
-      <FilterBar filters={filters} onChange={setFilters} facets={facets} />
+      <FilterBar
+        filters={filters}
+        onChange={setFilters}
+        facets={facets}
+        extra={
+          <Button icon={<ExportOutlined />} onClick={handleExport}>
+            导出
+          </Button>
+        }
+        rightExtra={
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            工单同步时间：{lastUpdateTime || "-"}
+          </Typography.Text>
+        }
+      />
 
       <div className="tc-table-card">
         <Table
