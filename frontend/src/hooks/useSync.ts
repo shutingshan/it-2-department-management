@@ -52,8 +52,9 @@ export function useSync(onRefresh?: () => void) {
         { actor: user.name, mode },
         { timeout: 300000 }
       );
+      setJob(res.data.job);
       onRefresh?.();
-      return res.data.addedCount as number;
+      return res.data as { addedCount: number; updatedCount: number; failedCount: number; failReasons: string[] };
     } catch (e: any) {
       setError(e?.response?.data?.message ?? "获取新工单失败");
       throw e;

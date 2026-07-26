@@ -177,17 +177,11 @@ export function genTicket(year: number, seqInYear: number, submittedAt: dayjs.Da
   if (status === "已梳理") {
     devStatus = pick(DEV_STATUS_BY_STATUS["已梳理"]);
   }
-  const stage = resolveStage(status, devStatus);
 
   const estimatedHours = Number((randInt(4, 80) / 2).toFixed(1));
-  const isDone = stage === "已完成" || stage === "关闭";
-  const actualHours = isDone
-    ? Number((estimatedHours + randInt(-15, 20) / 2).toFixed(1))
-    : rand() > 0.5
-    ? Number((estimatedHours * (0.2 + rand() * 0.6)).toFixed(1))
-    : 0;
 
-  const subTickets = hasSubTickets
+  // 子需求核心信息（实际工时需等工单阶段/是否完成确定后再补，见下方）
+  const subTicketsCore = hasSubTickets
     ? Array.from({ length: randInt(2, 4) }).map((_, i) => {
         const dev = pick(DEVELOPERS);
         const iter = makeIteration(submittedAt, i);
@@ -205,34 +199,49 @@ export function genTicket(year: number, seqInYear: number, submittedAt: dayjs.Da
           monthlyPlan: [dayjs(submittedAt).add(i, "month").format("YYYY-MM")],
           iteration: iter,
           estimatedHours: subEst,
-          actualHours: isDone ? Number((subEst + randInt(-4, 4) / 2).toFixed(1)) : 0,
         };
       })
     : [];
 
   const developer = hasSubTickets
-    ? dedupe(subTickets.map((s) => s.developer))
+    ? dedupe(subTicketsCore.map((s) => s.developer))
     : hasTapd
     ? [pick(DEVELOPERS).name]
     : [];
 
   const currentHandler = hasSubTickets
-    ? subTickets.map((s) => s.currentHandler).join("、")
+    ? subTicketsCore.map((s) => s.currentHandler).join("、")
     : hasTapd
     ? developer[0] ?? itHandler.name
     : itHandler.name;
 
   const monthlyPlan = hasSubTickets
-    ? dedupe(subTickets.flatMap((s) => s.monthlyPlan))
+    ? dedupe(subTicketsCore.flatMap((s) => s.monthlyPlan))
     : hasTapd
     ? [submittedAt.format("YYYY-MM")]
     : [];
 
   const iterations = hasSubTickets
-    ? (subTickets.map((s) => s.iteration).filter(Boolean) as IterationRef[])
+    ? (subTicketsCore.map((s) => s.iteration).filter(Boolean) as IterationRef[])
     : hasTapd
     ? [makeIteration(submittedAt, 0)]
     : [];
+
+  // 工单阶段依赖迭代字段（是否已纳入真实迭代），需在迭代计算完成后再推导
+  const stage = resolveStage(status, devStatus, iterations);
+  const isDone = stage === "已完成" || stage === "关闭";
+
+  const actualHours = isDone
+    ? Number((estimatedHours + randInt(-15, 20) / 2).toFixed(1))
+    : rand() > 0.5
+    ? Number((estimatedHours * (0.2 + rand() * 0.6)).toFixed(1))
+    : 0;
+
+  // 补上子需求的实际工时（依赖 isDone）
+  const subTickets = subTicketsCore.map((s) => ({
+    ...s,
+    actualHours: isDone ? Number((s.estimatedHours + randInt(-4, 4) / 2).toFixed(1)) : 0,
+  }));
 
   const actualHoursTotal = hasSubTickets
     ? Number(subTickets.reduce((sum, s) => sum + s.actualHours, 0).toFixed(1))

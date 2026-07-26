@@ -54,8 +54,9 @@ function parseDeveloperList(v: string | undefined): string[] {
  */
 export function mapScrapedRowToTicket(row: ScrapedRow, existing?: Ticket): Ticket {
   const status = parseStatus(row["状态"]);
-  const devStatus = null; // 当曲云本身不带 TAPD 需求开发状态，等 TAPD 接入后再补充
-  const stage = resolveStage(status, devStatus);
+  const devStatus = existing?.devStatus ?? null; // 当曲云本身不带 TAPD 需求开发状态，沿用已有值，等 TAPD 同步再更新
+  const iterations = existing?.iterations ?? [];
+  const stage = resolveStage(status, devStatus, iterations);
 
   const tapdUrl = emptyToNull(row["关联TAPD"]);
   const developer = parseDeveloperList(row["开发人员"]);
@@ -89,7 +90,7 @@ export function mapScrapedRowToTicket(row: ScrapedRow, existing?: Ticket): Ticke
     priority: emptyToNull(row["优先级"]),
     isReturned: existing?.isReturned ?? false,
     monthlyPlan: existing?.monthlyPlan ?? [],
-    iterations: existing?.iterations ?? [],
+    iterations,
     expectedTriageTime: emptyToNull(row["预计梳理完成"]),
     actualTriageTime: existing?.actualTriageTime ?? null,
     expectedCompleteTime,
