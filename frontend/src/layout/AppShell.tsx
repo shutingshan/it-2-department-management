@@ -176,69 +176,17 @@ function SwitchTargetButton() {
 
 function UserMenu() {
   const { user } = useAuthStore();
-  const [switching, setSwitching] = useState(false);
   if (!user) return null;
 
-  const isAdmin = user.role === "admin";
-
   return (
-    <>
-      <Space size={6}>
-        <Avatar size="small" style={{ backgroundColor: user.avatarColor }}>
-          {user.name.slice(-1)}
-        </Avatar>
-        <Typography.Text>{user.name}</Typography.Text>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          {ROLE_LABELS[user.role]}
-        </Typography.Text>
-        {isAdmin && (
-          <Button size="small" type="link" icon={<SwapOutlined />} onClick={() => setSwitching(true)}>
-            切换人员
-          </Button>
-        )}
-      </Space>
-      <SwitchUserModal open={switching} onClose={() => setSwitching(false)} />
-    </>
-  );
-}
-
-function SwitchUserModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { setUser } = useAuthStore();
-  const [users, setUsers] = useState<any[]>([]);
-
-  async function loadUsers() {
-    const res = await api.get("/auth/users");
-    setUsers(res.data.data);
-  }
-
-  return (
-    <Modal
-      title="切换人员（管理员专属）"
-      open={open}
-      onCancel={onClose}
-      afterOpenChange={(visible) => visible && loadUsers()}
-      footer={null}
-    >
-      <div className="switch-user-list">
-        {users.map((u) => (
-          <div
-            key={u.id}
-            className="switch-user-item"
-            onClick={() => {
-              setUser(u);
-              onClose();
-            }}
-          >
-            <Avatar size="small" style={{ backgroundColor: u.avatarColor }}>
-              {u.name.slice(-1)}
-            </Avatar>
-            <span>{u.name}</span>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {ROLE_LABELS[u.role as keyof typeof ROLE_LABELS]}
-            </Typography.Text>
-          </div>
-        ))}
-      </div>
-    </Modal>
+    <Space size={6}>
+      <Avatar size="small" style={{ backgroundColor: user.avatarColor }}>
+        {user.name.slice(-1)}
+      </Avatar>
+      <Typography.Text>{user.name}</Typography.Text>
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        {ROLE_LABELS[user.role]}
+      </Typography.Text>
+    </Space>
   );
 }
