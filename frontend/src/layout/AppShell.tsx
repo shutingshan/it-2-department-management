@@ -2,11 +2,14 @@ import { useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Avatar, Breadcrumb, Button, Layout, Menu, Modal, Space, Typography } from "antd";
 import {
+  ApartmentOutlined,
   AppstoreOutlined,
   BarChartOutlined,
   ClusterOutlined,
+  HistoryOutlined,
   HomeOutlined,
   LogoutOutlined,
+  SettingOutlined,
   SwapOutlined,
   UserOutlined,
 } from "@ant-design/icons";
@@ -20,7 +23,7 @@ import "./AppShell.css";
 
 const { Sider, Header, Content } = Layout;
 
-const MENU_ITEMS = [
+const BASE_MENU_ITEMS = [
   { key: "/home", icon: <HomeOutlined />, label: "首页" },
   { key: "/tickets", icon: <AppstoreOutlined />, label: "工单中心" },
   { key: "/dev-hours", icon: <BarChartOutlined />, label: "开发工时统计" },
@@ -37,6 +40,17 @@ export default function AppShell() {
   if (!user) {
     return <Navigate to="/login" replace />;
   }
+
+  // "账号配置"/"变更日志"/"部门配置"仅管理员可见
+  const MENU_ITEMS =
+    user.role === "admin"
+      ? [
+          ...BASE_MENU_ITEMS,
+          { key: "/dept-config", icon: <ApartmentOutlined />, label: "部门配置" },
+          { key: "/account-config", icon: <SettingOutlined />, label: "账号配置" },
+          { key: "/change-logs", icon: <HistoryOutlined />, label: "变更日志" },
+        ]
+      : BASE_MENU_ITEMS;
 
   function handleLogout() {
     Modal.confirm({

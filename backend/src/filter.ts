@@ -109,3 +109,14 @@ export function isSameYear(dateStr: string | null, year: number): boolean {
   if (!dateStr) return false;
   return dayjs(dateStr).year() === year;
 }
+
+// 需求方仅能查看发起人或关注人包含本人的数据；管理员/IT受理人不受此限制（IT受理人的限制体现在编辑权限上，不影响查看）
+export function scopeForActor(tickets: Ticket[], actor?: string, actorRole?: string): Ticket[] {
+  if (actorRole !== "requester" || !actor) return tickets;
+  return tickets.filter((t) => t.requester === actor || t.watcher.includes(actor));
+}
+
+export function canViewTicket(ticket: Ticket, actor?: string, actorRole?: string): boolean {
+  if (actorRole !== "requester" || !actor) return true;
+  return ticket.requester === actor || ticket.watcher.includes(actor);
+}

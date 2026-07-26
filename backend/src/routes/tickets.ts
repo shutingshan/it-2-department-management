@@ -1,7 +1,7 @@
 import { Router } from "express";
 import dayjs from "dayjs";
 import { store } from "../store";
-import { applyFilters, parseQuery } from "../filter";
+import { applyFilters, canViewTicket, parseQuery, scopeForActor } from "../filter";
 import { dedupe, stripCurrentIterationTag } from "../mapping";
 import { computeCardStats } from "../cards";
 import { ChangeLogEntry } from "../types";
@@ -15,7 +15,9 @@ router.get("/card-stats", (req, res) => {
 
 router.get("/", (req, res) => {
   const q = parseQuery(req.query as Record<string, unknown>);
-  const filtered = applyFilters(store.tickets, q);
+  const { actor, actorRole } = req.query as { actor?: string; actorRole?: string };
+  const scoped = scopeForActor(store.tickets, actor, actorRole);
+  const filtered = applyFilters(scoped, q);
 
   const page = Number(req.query.page ?? 1);
   const pageSize = Number(req.query.pageSize ?? 20);
@@ -39,6 +41,10 @@ router.get("/", (req, res) => {
 router.get("/:id", (req, res) => {
   const ticket = store.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ message: "工单不存在" });
+  const { actor, actorRole } = req.query as { actor?: string; actorRole?: string };
+  if (!canViewTicket(ticket, actor, actorRole)) {
+    return res.status(403).json({ message: "无权限查看该工单" });
+  }
   res.json({ data: ticket });
 });
 
@@ -55,6 +61,14 @@ router.patch("/:id", (req, res) => {
     actorRole: string;
   };
   if (!actor) return res.status(400).json({ message: "缺少操作人信息，无法提交" });
+
+  // IT 受理人仅可编辑自己负责的数据；需求方仅可编辑发起人或关注人包含本人的数据
+  if (actorRole === "it_handler" && ticket.itHandler !== actor) {
+    return res.status(403).json({ message: "无权限：仅能编辑本人负责的工单" });
+  }
+  if (actorRole === "requester" && !canViewTicket(ticket, actor, actorRole)) {
+    return res.status(403).json({ message: "无权限：仅能编辑发起人或关注人包含本人的工单" });
+  }
 
   const changeEntries: ChangeLogEntry[] = [];
   for (const key of Object.keys(fields)) {

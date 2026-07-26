@@ -24,14 +24,16 @@ export default function DetailModal({
   const [subTab, setSubTab] = useState<"detail" | "history">("detail");
 
   useEffect(() => {
-    if (open && ticketId) {
-      api.get(`/tickets/${ticketId}`).then((res) => {
-        setTicket(res.data.data);
-        setEdited({});
-        setSubTab("detail");
-      });
+    if (open && ticketId && user) {
+      api
+        .get(`/tickets/${ticketId}`, { params: { actor: user.name, actorRole: user.role } })
+        .then((res) => {
+          setTicket(res.data.data);
+          setEdited({});
+          setSubTab("detail");
+        });
     }
-  }, [open, ticketId]);
+  }, [open, ticketId, user]);
 
   async function handleSubmit() {
     if (!ticket || !user) return;
@@ -65,6 +67,8 @@ export default function DetailModal({
 
   const deviation = hoursDeviation(ticket);
   const deviationClass = deviation >= 5 ? "dev-red" : deviation > 0 ? "dev-yellow" : "";
+  // IT 受理人仅能编辑本人负责的工单；需求方可见的工单本身已限定为本人相关，管理员不受限
+  const canEdit = !(user?.role === "it_handler" && ticket.itHandler !== user.name);
 
   return (
     <Modal
@@ -134,6 +138,7 @@ export default function DetailModal({
             <Descriptions.Item label="紧急">
               <Switch
                 size="small"
+                disabled={!canEdit}
                 checked={edited.urgent ?? ticket.urgent}
                 onChange={(checked) => setEdited((s) => ({ ...s, urgent: checked }))}
               />
@@ -154,6 +159,7 @@ export default function DetailModal({
             <Descriptions.Item label="备注" span={4}>
               <Input
                 size="small"
+                disabled={!canEdit}
                 defaultValue={ticket.remark}
                 placeholder="填写备注"
                 onChange={(e) => setEdited((s) => ({ ...s, remark: e.target.value }))}

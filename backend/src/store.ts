@@ -1,7 +1,7 @@
 import dayjs from "dayjs";
 import { v4 as uuid } from "uuid";
-import { DEPARTMENTS, USERS, generateLogs, generateMessages, generateTickets } from "./seed";
-import { ChangeLogEntry, InSiteMessage, LogEntry, Ticket } from "./types";
+import { DEPARTMENTS, USERS, generateAccounts, generateLogs, generateMessages, generateTickets } from "./seed";
+import { Account, ChangeLogEntry, InSiteMessage, LogEntry, Ticket } from "./types";
 
 interface SyncJob {
   id: string;
@@ -20,6 +20,7 @@ class Store {
   tickets: Ticket[] = generateTickets();
   departments = DEPARTMENTS;
   users = USERS;
+  accounts: Account[] = generateAccounts();
   messages: InSiteMessage[] = generateMessages(this.tickets);
   logs: LogEntry[] = generateLogs();
   lastUpdateTime: string = dayjs("2026-07-24 08:00").format("YYYY-MM-DD HH:mm:ss");

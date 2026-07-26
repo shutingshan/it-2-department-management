@@ -92,7 +92,18 @@ function InlineUrgentSwitch({ ticket, onSaved }: { ticket: Ticket; onSaved: () =
     }
   }
 
-  return <Switch size="small" checked={ticket.urgent} loading={loading} onChange={toggle} />;
+  // IT 受理人仅能编辑本人负责的工单；需求方可见的工单本身已限定为本人相关，管理员不受限
+  const canEdit = !(user?.role === "it_handler" && ticket.itHandler !== user.name);
+
+  return (
+    <Switch
+      size="small"
+      checked={ticket.urgent}
+      loading={loading}
+      disabled={!canEdit}
+      onChange={toggle}
+    />
+  );
 }
 
 function InlineRemarkInput({ ticket, onSaved }: { ticket: Ticket; onSaved: () => void }) {
@@ -120,11 +131,13 @@ function InlineRemarkInput({ ticket, onSaved }: { ticket: Ticket; onSaved: () =>
     }
   }
 
+  const canEdit = !(user?.role === "it_handler" && ticket.itHandler !== user.name);
+
   return (
     <Input
       size="small"
       value={value}
-      disabled={saving}
+      disabled={saving || !canEdit}
       placeholder="填写备注"
       onChange={(e) => setValue(e.target.value)}
       onBlur={commit}

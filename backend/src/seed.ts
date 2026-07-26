@@ -1,6 +1,7 @@
 import { v4 as uuid } from "uuid";
 import dayjs from "dayjs";
 import {
+  Account,
   Department,
   InSiteMessage,
   IterationRef,
@@ -382,4 +383,21 @@ export function generateLogs(): LogEntry[] {
       detail: success ? "执行成功" : "执行失败，已记录变更日志",
     };
   });
+}
+
+// 账号配置初始数据：单术婷为系统默认超级管理员，不可编辑/删除；
+// 其余管理员/IT受理人/需求方角色的现有人员默认已配置好账号，避免上线后现有人员无法登录
+export function generateAccounts(): Account[] {
+  const admin = USERS.find((u) => u.role === "admin")!;
+  const configurable = USERS.filter((u) => u.role === "it_handler" || u.role === "requester");
+  return [
+    { id: uuid(), userId: admin.id, name: admin.name, pinyin: admin.pinyin, role: "admin", locked: true },
+    ...configurable.map((u) => ({
+      id: uuid(),
+      userId: u.id,
+      name: u.name,
+      pinyin: u.pinyin,
+      role: u.role as Account["role"],
+    })),
+  ];
 }

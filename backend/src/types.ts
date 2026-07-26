@@ -21,6 +21,18 @@ export interface Department {
   parentId: string | null;
 }
 
+// 账号配置支持的登录角色：管理员/IT受理人/需求方。开发人员/测试人员/产品经理仅作为工单数据里的人员标签存在，不具备登录能力
+export type AccountRole = "admin" | "it_handler" | "requester";
+
+export interface Account {
+  id: string;
+  userId: string; // 关联 USERS 中的人员记录，姓名/拼音码/部门等信息取自该记录
+  name: string;
+  pinyin: string;
+  role: AccountRole;
+  locked?: boolean; // 系统默认超级管理员账号，不可编辑、不可删除
+}
+
 // 状态：来自当曲云/TAPD原始状态
 export type TicketStatus =
   | "待处理"

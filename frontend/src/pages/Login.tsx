@@ -29,8 +29,8 @@ export default function Login() {
       navigate("/tickets");
     } catch (e: any) {
       if (e?.response?.status === 404) {
-        // 账号不存在：区分“账号不存在”与“系统加载失败”
-        setErrorText(`账号不存在，如无权限请联系管理员「${e.response.data?.adminName ?? "管理员"}」`);
+        // 账号未在“账号配置”中授权：区分“未授权”与“系统加载失败”
+        setErrorText(`当前账号未授权，请联系管理员「${e.response.data?.adminName ?? "管理员"}」进行授权`);
       } else {
         setErrorText("系统加载失败，请稍后重试");
       }

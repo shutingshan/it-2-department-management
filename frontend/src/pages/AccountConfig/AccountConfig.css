@@ -1,0 +1,12 @@
+.account-config-page {
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+
+.account-config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
