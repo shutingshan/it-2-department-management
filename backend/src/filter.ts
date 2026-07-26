@@ -1,5 +1,6 @@
 import dayjs from "dayjs";
 import { Ticket } from "./types";
+import { filterByCard } from "./cards";
 
 export interface TicketQuery {
   search?: string;
@@ -14,6 +15,7 @@ export interface TicketQuery {
   requesterDept?: string[];
   requester?: string[];
   itHandler?: string[];
+  cardKey?: string;
   sortField?: string;
   sortOrder?: "asc" | "desc";
 }
@@ -38,6 +40,7 @@ export function parseQuery(q: Record<string, unknown>): TicketQuery {
     requesterDept: toArray(q.requesterDept),
     requester: toArray(q.requester),
     itHandler: toArray(q.itHandler),
+    cardKey: q.cardKey ? String(q.cardKey) : undefined,
     sortField: q.sortField ? String(q.sortField) : "submittedAt",
     sortOrder: q.sortOrder === "asc" ? "asc" : "desc",
   };
@@ -78,6 +81,7 @@ export function applyFilters(tickets: Ticket[], q: TicketQuery): Ticket[] {
   if (q.requesterDept?.length) result = result.filter((t) => q.requesterDept!.includes(t.requesterDept));
   if (q.requester?.length) result = result.filter((t) => q.requester!.includes(t.requester));
   if (q.itHandler?.length) result = result.filter((t) => q.itHandler!.includes(t.itHandler));
+  if (q.cardKey) result = filterByCard(result, q.cardKey);
 
   const field = q.sortField ?? "submittedAt";
   const order = q.sortOrder ?? "desc";
