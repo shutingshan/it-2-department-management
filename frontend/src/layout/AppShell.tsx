@@ -2,9 +2,11 @@ import { useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Avatar, Breadcrumb, Button, Layout, Menu, Modal, Space, Typography } from "antd";
 import {
+  ApartmentOutlined,
   AppstoreOutlined,
   BarChartOutlined,
   ClusterOutlined,
+  HistoryOutlined,
   HomeOutlined,
   LogoutOutlined,
   SettingOutlined,
@@ -39,10 +41,15 @@ export default function AppShell() {
     return <Navigate to="/login" replace />;
   }
 
-  // "账号配置"仅管理员可见
+  // "账号配置"/"变更日志"/"部门配置"仅管理员可见
   const MENU_ITEMS =
     user.role === "admin"
-      ? [...BASE_MENU_ITEMS, { key: "/account-config", icon: <SettingOutlined />, label: "账号配置" }]
+      ? [
+          ...BASE_MENU_ITEMS,
+          { key: "/dept-config", icon: <ApartmentOutlined />, label: "部门配置" },
+          { key: "/account-config", icon: <SettingOutlined />, label: "账号配置" },
+          { key: "/change-logs", icon: <HistoryOutlined />, label: "变更日志" },
+        ]
       : BASE_MENU_ITEMS;
 
   function handleLogout() {

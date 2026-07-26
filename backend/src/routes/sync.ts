@@ -36,10 +36,9 @@ router.get("/status", (req, res) => {
   res.json({ job: store.currentJob, lastUpdateTime: store.lastUpdateTime });
 });
 
-router.post("/fetch-new", async (req, res) => {
-  const { actor, mode } = req.body as { actor: string; mode?: "incremental" | "full" };
+// 获取新工单：供路由与定时任务共用；失败时已在此处记录变更日志并向上抛出
+export async function runFetchNew(actor: string, mode?: "incremental" | "full") {
   const isFull = mode === "full";
-
   try {
     // 真实抓取当曲云工单列表（需要 backend/.env 配置好账号密码，见 .env.example）；
     // 增量模式：按"编号"跟工单中心现有数据比对，只新增工单中心里还没有的；
@@ -72,7 +71,7 @@ router.post("/fetch-new", async (req, res) => {
         isFull ? `全量获取，新增 ${addedCount} 条，覆盖更新 ${updatedCount} 条` : `增量获取新工单 ${addedCount} 条`
       }`,
     });
-    res.json({ addedCount });
+    return { addedCount };
   } catch (e) {
     const message = (e as Error).message ?? "未知错误";
     store.addLog({
@@ -83,11 +82,22 @@ router.post("/fetch-new", async (req, res) => {
       failReason: message,
       detail: "获取新工单失败",
     });
-    res.status(500).json({ message: `获取新工单失败：${message}` });
+    throw e;
+  }
+}
+
+router.post("/fetch-new", async (req, res) => {
+  const { actor, mode } = req.body as { actor: string; mode?: "incremental" | "full" };
+  try {
+    const result = await runFetchNew(actor, mode);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ message: `获取新工单失败：${(e as Error).message ?? "未知错误"}` });
   }
 });
 
 let jobTimer: NodeJS.Timeout | null = null;
+let jobDoneResolver: ((job: SyncJob) => void) | null = null;
 
 function stopJobTimer() {
   if (jobTimer) {
@@ -96,19 +106,18 @@ function stopJobTimer() {
   }
 }
 
-router.post("/update-tickets", (req, res) => {
-  const { actor, actorRole, filters } = req.body as { actor: string; actorRole: string; filters?: unknown };
-
-  if (actorRole !== "admin" && !withinUpdateWindow()) {
-    return res.status(403).json({
-      message: "当前不在可执行时间窗口内（北京时间 07:00 前 / 11:30-12:50 / 18:30 后，管理员不限）",
-    });
+// 结束当前任务（正常完成或被手动终止均会走到这里），并唤醒等待中的调用方（如定时任务链）
+function finishJob(job: SyncJob) {
+  stopJobTimer();
+  if (jobDoneResolver) {
+    const resolve = jobDoneResolver;
+    jobDoneResolver = null;
+    resolve(job);
   }
-  if (store.currentJob?.status === "running") {
-    return res.status(409).json({ message: "已有同步任务在执行中" });
-  }
+}
 
-  // 按工单中心当前筛选条件圈定候选工单；未传筛选条件时默认仅处理未完成未关闭工单
+// 更新工单：供路由与定时任务共用。done 在任务完成（含被终止）时 resolve，便于定时任务链式等待
+export function startUpdateTicketsJob(actor: string, filters?: unknown): { job: SyncJob; done: Promise<SyncJob> } {
   const candidates = resolveCandidates(filters);
   const job: SyncJob = {
     id: `job-${Date.now()}`,
@@ -124,11 +133,15 @@ router.post("/update-tickets", (req, res) => {
   };
   store.currentJob = job;
 
+  const done = new Promise<SyncJob>((resolve) => {
+    jobDoneResolver = resolve;
+  });
+
   let idx = 0;
   stopJobTimer();
   jobTimer = setInterval(async () => {
     if (job.status !== "running") {
-      stopJobTimer();
+      finishJob(job);
       return;
     }
     const batch = candidates.slice(idx, idx + 5);
@@ -179,10 +192,26 @@ router.post("/update-tickets", (req, res) => {
         failReason: job.failed ? job.failReasons.join("; ") : null,
         detail: `批量更新完成，成功 ${job.success} 条，失败 ${job.failed} 条`,
       });
-      stopJobTimer();
+      finishJob(job);
     }
   }, 400);
 
+  return { job, done };
+}
+
+router.post("/update-tickets", (req, res) => {
+  const { actor, actorRole, filters } = req.body as { actor: string; actorRole: string; filters?: unknown };
+
+  if (actorRole !== "admin" && !withinUpdateWindow()) {
+    return res.status(403).json({
+      message: "当前不在可执行时间窗口内（北京时间 07:00 前 / 11:30-12:50 / 18:30 后，管理员不限）",
+    });
+  }
+  if (store.currentJob?.status === "running") {
+    return res.status(409).json({ message: "已有同步任务在执行中" });
+  }
+
+  const { job } = startUpdateTicketsJob(actor, filters);
   res.json({ job });
 });
 
@@ -190,7 +219,6 @@ router.post("/terminate", (req, res) => {
   if (store.currentJob && store.currentJob.status === "running") {
     store.currentJob.status = "terminated";
     store.currentJob.finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
-    stopJobTimer();
     store.addLog({
       type: store.currentJob.type === "sync_tapd" ? "同步TAPD" : "更新工单",
       time: store.currentJob.finishedAt,
@@ -199,13 +227,13 @@ router.post("/terminate", (req, res) => {
       failReason: "任务被手动终止",
       detail: `已处理 ${store.currentJob.processed}/${store.currentJob.total}`,
     });
+    finishJob(store.currentJob);
   }
   res.json({ job: store.currentJob });
 });
 
-router.post("/tapd", (req, res) => {
-  const { actor, filters } = req.body as { actor: string; filters?: unknown };
-  // 获取TAPD信息：按工单中心当前筛选条件圈定候选工单（仅处理有 TAPD 地址的工单）
+// 获取TAPD信息：供路由与定时任务共用；不传 filters 时默认仅覆盖未完成未关闭且有TAPD地址的数据
+export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; done: Promise<SyncJob> } {
   const candidates = resolveCandidates(filters).filter((t) => t.tapdUrl);
   const job: SyncJob = {
     id: `job-${Date.now()}`,
@@ -221,11 +249,15 @@ router.post("/tapd", (req, res) => {
   };
   store.currentJob = job;
 
+  const done = new Promise<SyncJob>((resolve) => {
+    jobDoneResolver = resolve;
+  });
+
   let idx = 0;
   stopJobTimer();
   jobTimer = setInterval(() => {
     if (job.status !== "running") {
-      stopJobTimer();
+      finishJob(job);
       return;
     }
     const batch = candidates.slice(idx, idx + 5);
@@ -263,10 +295,16 @@ router.post("/tapd", (req, res) => {
         failReason: job.failed ? job.failReasons.join("; ") : null,
         detail: `同步 TAPD 完成，成功 ${job.success} 条，失败 ${job.failed} 条`,
       });
-      stopJobTimer();
+      finishJob(job);
     }
   }, 400);
 
+  return { job, done };
+}
+
+router.post("/tapd", (req, res) => {
+  const { actor, filters } = req.body as { actor: string; filters?: unknown };
+  const { job } = startTapdJob(actor, filters);
   res.json({ job });
 });
 

@@ -1,0 +1,12 @@
+.dept-config-page {
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+
+.dept-config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
