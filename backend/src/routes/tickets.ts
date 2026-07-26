@@ -42,7 +42,8 @@ router.get("/:id", (req, res) => {
   res.json({ data: ticket });
 });
 
-const EDITABLE_FIELDS = ["urgent", "itHandler", "category", "module"] as const;
+// 紧急、备注两个字段所有角色均可实时编辑，其余字段暂不支持通用编辑
+const EDITABLE_FIELDS = ["urgent", "remark"] as const;
 
 router.patch("/:id", (req, res) => {
   const ticket = store.getTicket(req.params.id);
@@ -54,16 +55,6 @@ router.patch("/:id", (req, res) => {
     actorRole: string;
   };
   if (!actor) return res.status(400).json({ message: "缺少操作人信息，无法提交" });
-
-  // 需求方角色仅能编辑紧急字段
-  if (actorRole === "requester") {
-    const disallowed = Object.keys(fields).filter((k) => k !== "urgent");
-    if (disallowed.length) {
-      return res.status(403).json({
-        message: `权限不足：需求方仅可编辑紧急字段，无法修改 ${disallowed.join(",")}`,
-      });
-    }
-  }
 
   const changeEntries: ChangeLogEntry[] = [];
   for (const key of Object.keys(fields)) {

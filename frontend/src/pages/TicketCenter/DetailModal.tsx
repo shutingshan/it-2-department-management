@@ -1,24 +1,12 @@
 import { useEffect, useState } from "react";
-import {
-  Button,
-  Descriptions,
-  Drawer,
-  Input,
-  Space,
-  Switch,
-  Table,
-  Tag,
-  Timeline,
-  Typography,
-  message,
-} from "antd";
+import { Button, Descriptions, Input, Modal, Space, Switch, Table, Tag, Timeline, Typography, message } from "antd";
 import { CopyOutlined, LinkOutlined } from "@ant-design/icons";
 import { api } from "../../api/client";
 import { hoursDeviation, STAGE_COLORS } from "../../api/types";
 import type { Ticket } from "../../api/types";
 import { useAuthStore } from "../../store/auth";
 
-export default function DetailDrawer({
+export default function DetailModal({
   ticketId,
   open,
   onClose,
@@ -31,7 +19,7 @@ export default function DetailDrawer({
 }) {
   const { user } = useAuthStore();
   const [ticket, setTicket] = useState<Ticket | null>(null);
-  const [edited, setEdited] = useState<Record<string, unknown>>({});
+  const [edited, setEdited] = useState<{ urgent?: boolean; remark?: string }>({});
   const [saving, setSaving] = useState(false);
   const [subTab, setSubTab] = useState<"detail" | "history">("detail");
 
@@ -44,9 +32,6 @@ export default function DetailDrawer({
       });
     }
   }, [open, ticketId]);
-
-  const canEditAll = user?.role === "admin" || user?.role === "it_handler";
-  const canEditUrgent = user?.role === "requester" || canEditAll;
 
   async function handleSubmit() {
     if (!ticket || !user) return;
@@ -65,26 +50,28 @@ export default function DetailDrawer({
       setEdited({});
       message.success("提交成功");
       onSaved();
+      onClose();
     } catch (e: any) {
-      message.error(e?.response?.data?.message ?? "提交失败，请检查权限或字段校验");
+      // 反馈失败原因：权限不足 / 字段校验失败 / 同步失败等，后端会给出具体文案
+      message.error(e?.response?.data?.message ?? "提交失败，请稍后重试");
     } finally {
       setSaving(false);
     }
   }
 
   if (!ticket) {
-    return <Drawer open={open} onClose={onClose} width={640} title="工单详情" destroyOnHidden />;
+    return <Modal open={open} onCancel={onClose} title="工单详情" footer={null} destroyOnHidden width={1100} />;
   }
 
   const deviation = hoursDeviation(ticket);
   const deviationClass = deviation >= 5 ? "dev-red" : deviation > 0 ? "dev-yellow" : "";
 
   return (
-    <Drawer
+    <Modal
       open={open}
-      onClose={onClose}
-      width={720}
+      onCancel={onClose}
       destroyOnHidden
+      width={1100}
       title={
         <Space>
           <span>{ticket.code}</span>
@@ -101,11 +88,12 @@ export default function DetailDrawer({
           {ticket.urgent && <Tag color="red">紧急</Tag>}
         </Space>
       }
-      extra={
+      footer={
         <Space>
           <Button onClick={() => setSubTab(subTab === "detail" ? "history" : "detail")}>
             {subTab === "detail" ? "查看变更记录" : "返回详情"}
           </Button>
+          <Button onClick={onClose}>取消</Button>
           <Button type="primary" loading={saving} onClick={handleSubmit}>
             提交
           </Button>
@@ -113,41 +101,21 @@ export default function DetailDrawer({
       }
     >
       {subTab === "detail" ? (
-        <>
-          <Descriptions column={2} size="small" bordered>
-            <Descriptions.Item label="标题" span={2}>
+        <div style={{ maxHeight: "calc(100vh - 260px)", overflow: "auto" }}>
+          <Descriptions column={4} size="small" bordered>
+            <Descriptions.Item label="标题" span={4}>
               {ticket.title}
             </Descriptions.Item>
-            <Descriptions.Item label="内容" span={2}>
+            <Descriptions.Item label="内容" span={4}>
               {ticket.content}
             </Descriptions.Item>
-            <Descriptions.Item label="分类">
-              {canEditAll ? (
-                <Input
-                  size="small"
-                  defaultValue={ticket.category}
-                  onChange={(e) => setEdited((s) => ({ ...s, category: e.target.value }))}
-                />
-              ) : (
-                ticket.category
-              )}
-            </Descriptions.Item>
+            <Descriptions.Item label="分类">{ticket.category}</Descriptions.Item>
             <Descriptions.Item label="归属应用">{ticket.owningApp}</Descriptions.Item>
-            <Descriptions.Item label="模块">
-              {canEditAll ? (
-                <Input
-                  size="small"
-                  defaultValue={ticket.module}
-                  onChange={(e) => setEdited((s) => ({ ...s, module: e.target.value }))}
-                />
-              ) : (
-                ticket.module
-              )}
-            </Descriptions.Item>
+            <Descriptions.Item label="模块">{ticket.module}</Descriptions.Item>
             <Descriptions.Item label="TAPD 地址">
               {ticket.tapdUrl ? (
                 <a href={ticket.tapdUrl} target="_blank" rel="noreferrer">
-                  <LinkOutlined /> 查看 TAPD
+                  <LinkOutlined /> 查看
                 </a>
               ) : (
                 <Typography.Text type="secondary">无</Typography.Text>
@@ -156,30 +124,19 @@ export default function DetailDrawer({
             <Descriptions.Item label="发起人">{ticket.requester}</Descriptions.Item>
             <Descriptions.Item label="发起部门">{ticket.requesterDept}</Descriptions.Item>
             <Descriptions.Item label="当前处理人">{ticket.currentHandler}</Descriptions.Item>
-            <Descriptions.Item label="IT 受理人">
-              {canEditAll ? (
-                <Input
-                  size="small"
-                  defaultValue={ticket.itHandler}
-                  onChange={(e) => setEdited((s) => ({ ...s, itHandler: e.target.value }))}
-                />
-              ) : (
-                ticket.itHandler
-              )}
-            </Descriptions.Item>
+            <Descriptions.Item label="IT 受理人">{ticket.itHandler}</Descriptions.Item>
             <Descriptions.Item label="开发人员">{ticket.developer.join("、") || "-"}</Descriptions.Item>
+            <Descriptions.Item label="工单阶段">
+              <Tag color={STAGE_COLORS[ticket.stage]}>{ticket.stage}</Tag>
+            </Descriptions.Item>
             <Descriptions.Item label="状态">{ticket.status}</Descriptions.Item>
+            <Descriptions.Item label="TAPD状态">{ticket.devStatus ?? "-"}</Descriptions.Item>
             <Descriptions.Item label="紧急">
-              {canEditUrgent ? (
-                <Switch
-                  defaultChecked={ticket.urgent}
-                  onChange={(checked) => setEdited((s) => ({ ...s, urgent: checked }))}
-                />
-              ) : ticket.urgent ? (
-                "是"
-              ) : (
-                "否"
-              )}
+              <Switch
+                size="small"
+                checked={edited.urgent ?? ticket.urgent}
+                onChange={(checked) => setEdited((s) => ({ ...s, urgent: checked }))}
+              />
             </Descriptions.Item>
             <Descriptions.Item label="优先级">{ticket.priority ?? "-"}</Descriptions.Item>
             <Descriptions.Item label="月度计划">{ticket.monthlyPlan.join("、") || "-"}</Descriptions.Item>
@@ -191,15 +148,37 @@ export default function DetailDrawer({
             <Descriptions.Item label="预计完成时间">{ticket.expectedCompleteTime ?? "-"}</Descriptions.Item>
             <Descriptions.Item label="实际完成时间">{ticket.actualCompleteTime ?? "-"}</Descriptions.Item>
             <Descriptions.Item label="预估工时">{ticket.estimatedHours}</Descriptions.Item>
-            <Descriptions.Item label="实际工时">{ticket.actualHours}</Descriptions.Item>
+            <Descriptions.Item label="完成工时">{ticket.actualHours}</Descriptions.Item>
             <Descriptions.Item label="工时偏差">
               <span className={deviationClass}>{deviation}</span>
             </Descriptions.Item>
             <Descriptions.Item label="提交时间">{ticket.submittedAt}</Descriptions.Item>
+            <Descriptions.Item label="备注" span={4}>
+              <Input
+                size="small"
+                defaultValue={ticket.remark}
+                placeholder="填写备注"
+                onChange={(e) => setEdited((s) => ({ ...s, remark: e.target.value }))}
+              />
+            </Descriptions.Item>
+            {ticket.tapdErrorNote && (
+              <Descriptions.Item label="TAPD异常备注" span={4}>
+                <Typography.Text type="danger">
+                  {ticket.tapdErrorNote.time} {ticket.tapdErrorNote.message}
+                </Typography.Text>
+              </Descriptions.Item>
+            )}
+            {ticket.dangquyunErrorNote && (
+              <Descriptions.Item label="同步当曲云异常" span={4}>
+                <Typography.Text type="danger">
+                  {ticket.dangquyunErrorNote.time} {ticket.dangquyunErrorNote.message}
+                </Typography.Text>
+              </Descriptions.Item>
+            )}
           </Descriptions>
 
           {ticket.subTickets.length > 0 && (
-            <div style={{ marginTop: 16 }}>
+            <div style={{ marginTop: 12 }}>
               <Typography.Title level={5}>子需求（{ticket.subTickets.length}）</Typography.Title>
               <Table
                 size="small"
@@ -207,19 +186,20 @@ export default function DetailDrawer({
                 pagination={false}
                 dataSource={ticket.subTickets}
                 columns={[
-                  { title: "编号", dataIndex: "code" },
                   { title: "标题", dataIndex: "title", ellipsis: true },
-                  { title: "开发人员", dataIndex: "developer" },
-                  { title: "当前处理人", dataIndex: "currentHandler" },
-                  { title: "迭代", dataIndex: ["iteration", "name"] },
-                  { title: "预估工时", dataIndex: "estimatedHours" },
-                  { title: "实际工时", dataIndex: "actualHours" },
+                  { title: "产品经理", dataIndex: "productManager", width: 90 },
+                  { title: "开发人员", dataIndex: "developer", width: 90 },
+                  { title: "测试人员", dataIndex: "tester", width: 90 },
+                  { title: "处理人", dataIndex: "currentHandler", width: 90 },
+                  { title: "TAPD状态", dataIndex: "tapdStatus", width: 90 },
+                  { title: "预估工时", dataIndex: "estimatedHours", width: 80 },
+                  { title: "完成工时", dataIndex: "actualHours", width: 80 },
                 ]}
               />
             </div>
           )}
 
-          <div style={{ marginTop: 16 }}>
+          <div style={{ marginTop: 12 }}>
             <Typography.Title level={5}>处理记录</Typography.Title>
             <Timeline
               items={ticket.processingNotes
@@ -237,7 +217,7 @@ export default function DetailDrawer({
                 }))}
             />
           </div>
-        </>
+        </div>
       ) : (
         <Table
           size="small"
@@ -253,6 +233,6 @@ export default function DetailDrawer({
           ]}
         />
       )}
-    </Drawer>
+    </Modal>
   );
 }

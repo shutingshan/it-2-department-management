@@ -70,13 +70,22 @@ export interface ProcessingNote {
 export interface SubTicket {
   id: string;
   code: string;
+  tapdUrl: string | null;
   title: string;
+  productManager: string;
   developer: string;
+  tester: string;
   currentHandler: string;
+  tapdStatus: string | null;
   monthlyPlan: string[];
   iteration: IterationRef | null;
   estimatedHours: number;
   actualHours: number;
+}
+
+export interface SyncErrorNote {
+  time: string;
+  message: string;
 }
 
 export interface Ticket {
@@ -100,6 +109,7 @@ export interface Ticket {
   status: TicketStatus;
   devStatus: string | null;
   urgent: boolean;
+  remark: string;
   priority: string | null;
   isReturned: boolean;
   monthlyPlan: string[];
@@ -116,6 +126,8 @@ export interface Ticket {
   processingNotes: ProcessingNote[];
   changeHistory: ChangeLogEntry[];
   slaFlag: string | null;
+  tapdErrorNote: SyncErrorNote | null;
+  dangquyunErrorNote: SyncErrorNote | null;
 }
 
 export interface InSiteMessage {

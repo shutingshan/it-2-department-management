@@ -101,3 +101,13 @@
 .row-urgent {
   background: #fff1f0;
 }
+
+.tc-table-card .ant-table-thead > tr > th {
+  position: relative;
+  background-clip: padding-box;
+}
+
+.tc-table-card .ant-table-body,
+.tc-table-card .ant-table-content {
+  overflow-y: auto !important;
+}
