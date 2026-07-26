@@ -35,10 +35,13 @@ export default function StatCards({
     <div className="stat-cards-row">
       {topLevel.map((card) => {
         const children = childrenOf(card.id);
+        const narrow = card.id === "total" || card.id === "done-closed";
         return (
           <div
             key={card.id}
-            className={"stat-card" + (activeCardKey === card.id ? " active" : "")}
+            className={
+              "stat-card" + (narrow ? " stat-card-narrow" : "") + (activeCardKey === card.id ? " active" : "")
+            }
             onClick={() => onSelect(card.id)}
           >
             <div className="stat-card-head">

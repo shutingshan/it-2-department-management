@@ -5,15 +5,6 @@
   height: calc(100vh - 88px);
 }
 
-.tc-toolbar {
-  background: #fff;
-  padding: 12px 16px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
 .filter-bar {
   background: #fff;
   padding: 12px 16px;
