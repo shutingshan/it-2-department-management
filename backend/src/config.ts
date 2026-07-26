@@ -38,4 +38,19 @@ export const config = {
       return v === "" ? undefined : (v as "chrome");
     },
   },
+  tapd: {
+    // TAPD 用扫码登录，没有账号密码；登录态通过 backend/.auth/tapd-state.json 复用
+    get baseUrl() {
+      return process.env.TAPD_BASE_URL || "https://www.tapd.cn/";
+    },
+    // 调试模式：保存失败截图/HTML 到 backend/.auth/debug/
+    get debug() {
+      return process.env.TAPD_DEBUG === "true";
+    },
+    get browserChannel(): "chrome" | undefined {
+      const v = process.env.TAPD_BROWSER_CHANNEL;
+      if (v === undefined) return "chrome";
+      return v === "" ? undefined : (v as "chrome");
+    },
+  },
 };

@@ -11,9 +11,14 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
   const [progressOpen, setProgressOpen] = useState(false);
 
   async function handleFetchNew(mode: "incremental" | "full") {
+    setProgressOpen(true);
     try {
-      const count = await fetchNew(mode);
-      message.success(`${mode === "full" ? "全量获取" : "获取新工单"}完成，新增 ${count ?? 0} 条`);
+      const result = await fetchNew(mode);
+      message.success(
+        `${mode === "full" ? "全量获取" : "获取新工单"}完成，新增 ${result?.addedCount ?? 0} 条，更新异常 ${
+          result?.failedCount ?? 0
+        } 条`
+      );
     } catch (e: any) {
       message.error(e?.response?.data?.message ?? "获取新工单失败");
     }
@@ -39,7 +44,13 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
 
   const progressPercent = job && job.total > 0 ? Math.round((job.processed / job.total) * 100) : 0;
   const jobLabel =
-    job?.type === "update_tickets" ? "更新工单" : job?.type === "sync_tapd" ? "获取TAPD信息" : "";
+    job?.type === "update_tickets"
+      ? "更新工单"
+      : job?.type === "sync_tapd"
+      ? "获取TAPD信息"
+      : job?.type === "fetch_new"
+      ? "获取新工单"
+      : "";
 
   const progressContent = (
     <div style={{ width: 280 }}>
