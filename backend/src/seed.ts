@@ -75,6 +75,10 @@ export const USERS: SeedUser[] = [
 const REQUESTERS = USERS.filter((u) => u.role === "requester");
 const IT_HANDLERS = USERS.filter((u) => u.role === "it_handler");
 const DEVELOPERS = USERS.filter((u) => u.role === "developer");
+const PMS = USERS.filter((u) => u.role === "pm");
+const TESTERS = USERS.filter((u) => u.role === "tester");
+
+const TAPD_STATUS_POOL = ["已规划", "已评审", "开发完成", "实现中", "转测试", "测试中", "待验收", "已验收"];
 
 const OWNING_APPS = ["ERP-业务", "印务管理", "lumi网站", "品牌代理", "集采", "OA办公", "财务系统"];
 const MODULES = ["-", "报关模块", "验货模块", "出运模块", "采购合同", "商品资料", "订单中心", "结算中心"];
@@ -127,12 +131,17 @@ function randomContent() {
   return pick(CONTENT_POOL);
 }
 
+const TODAY = dayjs("2026-07-24");
+
 function makeIteration(afterDate: dayjs.Dayjs, idx: number): IterationRef {
   const start = afterDate.add(idx * 14, "day");
   const end = start.add(13, "day");
   const dayOfYear = start.diff(dayjs(`${start.format("YYYY")}-01-01`), "day") + 1;
+  const name = `${start.format("YYYY")}-${String(Math.ceil(dayOfYear / 14)).padStart(2, "0")}迭代`;
+  // TAPD 原始迭代字段：进行中的迭代会带"（当前迭代）"后缀，展示/筛选前需截掉
+  const isCurrent = !TODAY.isBefore(start) && !TODAY.isAfter(end);
   return {
-    name: `${start.format("YYYY")}-${String(Math.ceil(dayOfYear / 14)).padStart(2, "0")}迭代`,
+    name: isCurrent ? `${name}（当前迭代）` : name,
     start: start.format("YYYY-MM-DD"),
     end: end.format("YYYY-MM-DD"),
   };
@@ -185,9 +194,13 @@ export function genTicket(year: number, seqInYear: number, submittedAt: dayjs.Da
         return {
           id: uuid(),
           code: `${code}-${i + 1}`,
+          tapdUrl: `https://www.tapd.cn/mock_workspace/prong/stories/view/${randInt(1000000, 9999999)}`,
           title: `${randomPinyinTitle()}（子需求${i + 1}）`,
+          productManager: pick(PMS).name,
           developer: dev.name,
+          tester: pick(TESTERS).name,
           currentHandler: dev.name,
+          tapdStatus: pick(TAPD_STATUS_POOL),
           monthlyPlan: [dayjs(submittedAt).add(i, "month").format("YYYY-MM")],
           iteration: iter,
           estimatedHours: subEst,
@@ -272,6 +285,7 @@ export function genTicket(year: number, seqInYear: number, submittedAt: dayjs.Da
     status,
     devStatus,
     urgent: rand() > 0.85,
+    remark: "",
     priority: pick(["High High", "High", "Middle", "Low"]),
     isReturned: rand() > 0.9,
     monthlyPlan,
@@ -288,6 +302,8 @@ export function genTicket(year: number, seqInYear: number, submittedAt: dayjs.Da
     processingNotes,
     changeHistory: [],
     slaFlag: null,
+    tapdErrorNote: null,
+    dangquyunErrorNote: null,
   };
 }
 
@@ -321,6 +337,14 @@ export function generateTickets(): Ticket[] {
     4
   ).forEach((t) => {
     t.stage = "已排期";
+  });
+
+  // 示例数据：展示 TAPD/当曲云同步异常反填效果
+  pickMany(openTickets, 2).forEach((t) => {
+    t.tapdErrorNote = { time: dayjs().subtract(1, "day").format("YYYY-MM-DD HH:mm:ss"), message: "TAPD状态字段获取失败" };
+  });
+  pickMany(openTickets, 2).forEach((t) => {
+    t.dangquyunErrorNote = { time: dayjs().subtract(2, "day").format("YYYY-MM-DD HH:mm:ss"), message: "找不到该工单编码" };
   });
 
   return tickets;

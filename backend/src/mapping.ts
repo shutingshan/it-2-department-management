@@ -38,3 +38,8 @@ export function resolveStage(status: TicketStatus, devStatus: string | null): Ti
 export function dedupe(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
 }
+
+// TAPD 迭代字段可能带有"（当前迭代）"后缀（如 260710～260712（当前迭代）），展示/筛选/去重前需先截掉
+export function stripCurrentIterationTag(name: string): string {
+  return name.replace(/[（(]当前迭代[）)]/g, "").trim();
+}

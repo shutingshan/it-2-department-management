@@ -70,13 +70,22 @@ export interface ProcessingNote {
 export interface SubTicket {
   id: string;
   code: string;
+  tapdUrl: string | null;
   title: string;
+  productManager: string;
   developer: string;
+  tester: string;
   currentHandler: string;
+  tapdStatus: string | null;
   monthlyPlan: string[];
   iteration: IterationRef | null;
   estimatedHours: number;
   actualHours: number;
+}
+
+export interface SyncErrorNote {
+  time: string;
+  message: string;
 }
 
 export interface Ticket {
@@ -100,6 +109,7 @@ export interface Ticket {
   status: TicketStatus;
   devStatus: string | null;
   urgent: boolean;
+  remark: string;
   priority: string | null;
   isReturned: boolean;
   monthlyPlan: string[];
@@ -116,6 +126,8 @@ export interface Ticket {
   processingNotes: ProcessingNote[];
   changeHistory: ChangeLogEntry[];
   slaFlag: string | null;
+  tapdErrorNote: SyncErrorNote | null;
+  dangquyunErrorNote: SyncErrorNote | null;
 }
 
 export interface InSiteMessage {
@@ -154,6 +166,15 @@ export interface SyncJob {
 
 export function hoursDeviation(t: Pick<Ticket, "estimatedHours" | "actualHours">): number {
   return Number((t.actualHours - t.estimatedHours).toFixed(1));
+}
+
+// TAPD 迭代字段可能带有"（当前迭代）"后缀（如 260710～260712（当前迭代）），展示前需先截掉再去重
+export function stripCurrentIterationTag(name: string): string {
+  return name.replace(/[（(]当前迭代[）)]/g, "").trim();
+}
+
+export function formatIterations(refs: Pick<IterationRef, "name">[]): string {
+  return Array.from(new Set(refs.map((i) => stripCurrentIterationTag(i.name)).filter(Boolean))).join("、") || "-";
 }
 
 export const STAGE_COLORS: Record<TicketStage, string> = {

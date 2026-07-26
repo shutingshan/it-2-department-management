@@ -77,13 +77,22 @@ export interface ProcessingNote {
 export interface SubTicket {
   id: string;
   code: string;
+  tapdUrl: string | null; // TAPD 地址
   title: string;
+  productManager: string; // 产品经理
   developer: string;
-  currentHandler: string;
+  tester: string; // 测试人员
+  currentHandler: string; // 处理人
+  tapdStatus: string | null; // TAPD 状态
   monthlyPlan: string[];
   iteration: IterationRef | null;
   estimatedHours: number;
   actualHours: number;
+}
+
+export interface SyncErrorNote {
+  time: string;
+  message: string;
 }
 
 export interface Ticket {
@@ -107,6 +116,7 @@ export interface Ticket {
   status: TicketStatus; // 状态
   devStatus: string | null; // TAPD 需求开发状态（用于阶段映射）
   urgent: boolean; // 紧急（需求方等角色手动维护，跟优先级是两回事）
+  remark: string; // 备注（工单中心内维护，所有角色可实时编辑）
   priority: string | null; // 优先级（当曲云字段，如 High/Middle/Low）
   isReturned: boolean; // 是否退回
   monthlyPlan: string[]; // 月度计划（去重）
@@ -123,6 +133,8 @@ export interface Ticket {
   processingNotes: ProcessingNote[]; // 处理记录
   changeHistory: ChangeLogEntry[]; // 变更记录
   slaFlag: string | null;
+  tapdErrorNote: SyncErrorNote | null; // 获取TAPD信息异常时反填
+  dangquyunErrorNote: SyncErrorNote | null; // 同步当曲云工单信息异常时反填
 }
 
 export interface InSiteMessage {

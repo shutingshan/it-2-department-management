@@ -5,6 +5,7 @@ import dayjs from "dayjs";
 import { store } from "../store";
 import { applyFilters, parseQuery } from "../filter";
 import { Ticket } from "../types";
+import { dedupe, stripCurrentIterationTag } from "../mapping";
 
 const router = Router();
 
@@ -39,7 +40,7 @@ function buildSheet(workbook: ExcelJS.Workbook, name: string, tickets: Ticket[])
       priority: t.priority ?? "-",
       urgent: t.urgent ? "是" : "否",
       stage: t.stage,
-      iterations: t.iterations.map((i) => i.name).join("、") || "-",
+      iterations: dedupe(t.iterations.map((i) => stripCurrentIterationTag(i.name))).join("、") || "-",
       monthlyPlan: t.monthlyPlan.join("、") || "-",
       expectedCompleteTime: t.expectedCompleteTime ?? "-",
       submittedAt: t.submittedAt,

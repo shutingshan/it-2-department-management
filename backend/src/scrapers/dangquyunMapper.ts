@@ -85,6 +85,7 @@ export function mapScrapedRowToTicket(row: ScrapedRow, existing?: Ticket): Ticke
     status,
     devStatus,
     urgent: existing?.urgent ?? false,
+    remark: existing?.remark ?? "",
     priority: emptyToNull(row["优先级"]),
     isReturned: existing?.isReturned ?? false,
     monthlyPlan: existing?.monthlyPlan ?? [],
@@ -107,5 +108,7 @@ export function mapScrapedRowToTicket(row: ScrapedRow, existing?: Ticket): Ticke
     ],
     changeHistory: existing?.changeHistory ?? [],
     slaFlag: emptyToNull(row["SLA"]),
+    tapdErrorNote: existing?.tapdErrorNote ?? null,
+    dangquyunErrorNote: existing?.dangquyunErrorNote ?? null,
   };
 }
