@@ -86,11 +86,29 @@ export interface TapdStoryFields {
   currentHandler: string | null;
 }
 
+// TAPD 需求详情页数据多为异步加载，页面骨架可能先于实际字段渲染出来；
+// 最多等 60 秒让内容真正加载完，而不是固定睡一小段时间就去抓取
+async function waitForContentToLoad(page: Page, timeoutMs = 60000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const text = await page.evaluate(() => document.body?.innerText?.trim().length ?? 0);
+      if (text > 0) {
+        await page.waitForTimeout(1000);
+        return;
+      }
+    } catch {
+      // 页面这期间又发生了一次内部跳转/刷新，执行上下文失效，当作"还没准备好"继续等
+    }
+    await page.waitForTimeout(500);
+  }
+}
+
 export async function scrapeTapdStoryFields(context: BrowserContext, tapdUrl: string): Promise<TapdStoryFields> {
   const page = await context.newPage();
   try {
-    await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForTimeout(1500);
+    await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await waitForContentToLoad(page);
     const targets: Locatable[] = [page, ...page.frames()];
 
     async function findLabel(...labels: string[]): Promise<string | null> {
