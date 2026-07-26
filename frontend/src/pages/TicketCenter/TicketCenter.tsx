@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Pagination, Space, Table, Tag, Tooltip, Typography, message } from "antd";
 import { CopyOutlined, ExportOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
@@ -17,10 +17,14 @@ import "./TicketCenter.css";
 export default function TicketCenter() {
   const { refreshTick } = useOutletContext<{ refreshTick: number }>();
   const location = useLocation();
-  const [filters, setFilters] = useState<TicketFilters>({
-    sortField: "submittedAt",
-    sortOrder: "desc",
-    ...((location.state as TicketFilters | undefined) ?? {}),
+  const [filters, setFilters] = useState<TicketFilters>(() => {
+    const stateFilters = location.state as TicketFilters | undefined;
+    // 任何角色进入工单中心，若不是带着具体筛选条件跳转过来的，默认按"未完成未关闭"卡片筛选
+    return {
+      sortField: "submittedAt",
+      sortOrder: "desc",
+      ...(stateFilters ?? { cardKey: "not-done" }),
+    };
   });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -48,11 +52,6 @@ export default function TicketCenter() {
   }, [refreshTick]);
 
   const { data, total, facets, loading, reload } = useTickets(filters, page, pageSize, refreshTick);
-
-  const lastTicket = useMemo(
-    () => data.find((t) => t.id === activeTicketId) ?? null,
-    [data, activeTicketId]
-  );
 
   function openDetail(id: string) {
     setActiveTicketId(id);
@@ -244,28 +243,6 @@ export default function TicketCenter() {
             }}
           />
         </div>
-      </div>
-
-      <div className="floating-actions">
-        <Tooltip title="打开详情" placement="left">
-          <Button
-            type="primary"
-            shape="circle"
-            disabled={!activeTicketId}
-            onClick={() => activeTicketId && setDetailOpen(true)}
-          >
-            详
-          </Button>
-        </Tooltip>
-        <Tooltip title={lastTicket && lastTicket.subTickets.length > 0 ? "查看子需求" : "无子需求"} placement="left">
-          <Button
-            shape="circle"
-            disabled={!lastTicket || lastTicket.subTickets.length === 0}
-            onClick={() => activeTicketId && setDetailOpen(true)}
-          >
-            子
-          </Button>
-        </Tooltip>
       </div>
 
       <DetailDrawer
