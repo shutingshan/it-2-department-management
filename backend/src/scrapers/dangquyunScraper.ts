@@ -20,27 +20,22 @@ export interface ScrapeResult {
 
 type Locatable = Page | Frame;
 
-// 当曲云基于 antd 组件库，表格数据是异步加载的：外壳（左侧菜单、顶部标签）先渲染出来，
-// 真正的工单列表在请求完成前会一直显示 antd 的加载中转圈（class 带 spin-spinning），
-// 不能只看页面有没有文字（菜单文字一直都在），要专门等这个转圈状态消失
-async function waitForSpinnersToFinish(targets: Locatable[], timeoutMs = 45000) {
+// 当曲云是微前端架构（主壳先渲染出来，工单列表本身由独立的远程模块异步加载挂载进来），
+// 首屏渲染出来时列表模块可能压根还没开始渲染，此时既没有文字也没有 antd 的加载中转圈（class
+// 带 spin-spinning），"没转圈=已加载完成"的判断会误判。所以不区分"等转圈消失"和"抓取"两步，
+// 而是直接反复尝试抓取，抓到数据或者彻底超时（4分钟）才停止
+async function waitForFirstPageData(
+  targets: Locatable[],
+  timeoutMs = 240000
+): Promise<{ rows: ScrapedRow[]; strategy: ExtractStrategy } | null> {
   const deadline = Date.now() + timeoutMs;
+  let lastAttempt: { rows: ScrapedRow[]; strategy: ExtractStrategy } | null = null;
   while (Date.now() < deadline) {
-    let anySpinning = false;
-    for (const target of targets) {
-      const count = await target
-        .locator('[class*="spin-spinning"]')
-        .count()
-        .catch(() => 0);
-      if (count > 0) {
-        anySpinning = true;
-        break;
-      }
-    }
-    if (!anySpinning) return;
-    await new Promise((r) => setTimeout(r, 800));
+    lastAttempt = await extractCurrentPage(targets);
+    if (lastAttempt) return lastAttempt;
+    await new Promise((r) => setTimeout(r, 1000));
   }
-  console.warn("[dangquyun] 等待加载中转圈消失超时，仍尝试继续抓取（可能数据本来就没加载出来）");
+  return lastAttempt;
 }
 
 // 当曲云（lumi 自研表格组件）的实际结构：既不是原生 table，也没有标准 ARIA role，
@@ -169,9 +164,7 @@ export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
     // 所以要连同页面里所有 iframe 一起找，而不只是主页面
     const targets: Locatable[] = [page, ...page.frames()];
 
-    await waitForSpinnersToFinish(targets);
-
-    const firstPage = await extractCurrentPage(targets);
+    const firstPage = await waitForFirstPageData(targets);
     if (!firstPage) {
       // 三种常见结构在主页面和所有 iframe 里都没找到：保存现场，方便针对实际页面结构调整选择器
       fs.mkdirSync(DEBUG_DIR, { recursive: true });
@@ -203,8 +196,7 @@ export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
       const moved = await goToNextPage(targets);
       if (!moved) break;
 
-      await waitForSpinnersToFinish(targets);
-      const next = await extractCurrentPage(targets);
+      const next = await waitForFirstPageData(targets);
       if (!next || next.rows.length === 0) break; // 翻页后抓不到数据了，停止，避免死循环
       allRows.push(...next.rows);
       pageCount += 1;

@@ -17,11 +17,11 @@ function ensureDirs() {
 // 所以这里不等 networkidle，只等 DOM 就绪。当曲云是基于 Next.js + Module Federation
 // 的微前端架构（首屏要加载几十个 JS chunk 再渲染进 #__next），首次渲染明显慢于普通网页，
 // 因此不用固定延时，而是轮询等到页面（或内嵌的子 frame，如果真的有的话）上出现可见文字为止，
-// 并把整体超时放宽到 60 秒
+// 并把整体超时放宽到 4 分钟（当曲云页面加载普遍偏慢）
 async function gotoAndSettle(page: Page, url: string) {
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 240000 });
 
-  const deadline = Date.now() + 60000;
+  const deadline = Date.now() + 240000;
   while (Date.now() < deadline) {
     try {
       for (const frame of page.frames()) {
@@ -84,6 +84,18 @@ async function performLogin(context: BrowserContext) {
 
   console.log(`[dangquyun] 未检测到有效登录态，开始登录流程: ${loginUrl}`);
   await gotoAndSettle(page, loginUrl);
+
+  // 登录页是 React 客户端渲染（页面骨架里页脚版权信息等文字先于登录表单出现），
+  // gotoAndSettle 的"页面有文字就算就绪"判断会提前满足，账号/密码输入框此时可能还没挂载，
+  // 需要单独等输入框真正出现在 DOM 里
+  try {
+    await page.waitForSelector(
+      'input[type="password"], input[type="text"], input[type="tel"], input[type="email"]',
+      { timeout: 240000 }
+    );
+  } catch {
+    // 等不到就继续走后面的兜底逻辑（会截图并报出"找不到输入框"的错误，方便排查）
+  }
   await dumpDebug(context, "login-page-before-fill");
 
   // 尝试用较通用的方式定位账号/密码输入框和登录按钮；
@@ -139,8 +151,8 @@ async function performLogin(context: BrowserContext) {
   }
 
   // 提交后按钮通常会有一小段"加载中"状态（接口请求进行中），不能按固定时间死等，
-  // 改成轮询：每隔 800ms 检查一次是否已经跳出登录页，最多等 20 秒
-  const pollDeadline = Date.now() + 20000;
+  // 改成轮询：每隔 800ms 检查一次是否已经跳出登录页，最多等 4 分钟（当曲云页面加载普遍偏慢）
+  const pollDeadline = Date.now() + 240000;
   while (Date.now() < pollDeadline) {
     if (!(await looksLikeLoginPage(context))) break;
     await page.waitForTimeout(800);
