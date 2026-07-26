@@ -1,6 +1,5 @@
-import dayjs from "dayjs";
 import { v4 as uuid } from "uuid";
-import { DEPARTMENTS, USERS, generateAccounts, generateLogs, generateMessages, generateTickets } from "./seed";
+import { DEPARTMENTS, USERS, generateAccounts } from "./seed";
 import { Account, ChangeLogEntry, InSiteMessage, LogEntry, Ticket } from "./types";
 
 interface SyncJob {
@@ -17,13 +16,15 @@ interface SyncJob {
 }
 
 class Store {
-  tickets: Ticket[] = generateTickets();
+  // 工单/处理记录/站内信/同步日志均为真实数据，不再生成模拟数据；
+  // 人员/部门/账号配置保留，保证系统登录与人员目录不受影响
+  tickets: Ticket[] = [];
   departments = DEPARTMENTS;
   users = USERS;
   accounts: Account[] = generateAccounts();
-  messages: InSiteMessage[] = generateMessages(this.tickets);
-  logs: LogEntry[] = generateLogs();
-  lastUpdateTime: string = dayjs("2026-07-24 08:00").format("YYYY-MM-DD HH:mm:ss");
+  messages: InSiteMessage[] = [];
+  logs: LogEntry[] = [];
+  lastUpdateTime = "";
   currentJob: SyncJob | null = null;
 
   getTicket(id: string) {
