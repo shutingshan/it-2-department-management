@@ -17,11 +17,11 @@ function ensureDirs() {
 // 所以这里不等 networkidle，只等 DOM 就绪。当曲云是基于 Next.js + Module Federation
 // 的微前端架构（首屏要加载几十个 JS chunk 再渲染进 #__next），首次渲染明显慢于普通网页，
 // 因此不用固定延时，而是轮询等到页面（或内嵌的子 frame，如果真的有的话）上出现可见文字为止，
-// 并把整体超时放宽到 2 分钟（当曲云页面加载普遍偏慢）
+// 并把整体超时放宽到 4 分钟（当曲云页面加载普遍偏慢）
 async function gotoAndSettle(page: Page, url: string) {
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120000 });
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 240000 });
 
-  const deadline = Date.now() + 120000;
+  const deadline = Date.now() + 240000;
   while (Date.now() < deadline) {
     try {
       for (const frame of page.frames()) {
@@ -91,7 +91,7 @@ async function performLogin(context: BrowserContext) {
   try {
     await page.waitForSelector(
       'input[type="password"], input[type="text"], input[type="tel"], input[type="email"]',
-      { timeout: 120000 }
+      { timeout: 240000 }
     );
   } catch {
     // 等不到就继续走后面的兜底逻辑（会截图并报出"找不到输入框"的错误，方便排查）
@@ -151,8 +151,8 @@ async function performLogin(context: BrowserContext) {
   }
 
   // 提交后按钮通常会有一小段"加载中"状态（接口请求进行中），不能按固定时间死等，
-  // 改成轮询：每隔 800ms 检查一次是否已经跳出登录页，最多等 2 分钟（当曲云页面加载普遍偏慢）
-  const pollDeadline = Date.now() + 120000;
+  // 改成轮询：每隔 800ms 检查一次是否已经跳出登录页，最多等 4 分钟（当曲云页面加载普遍偏慢）
+  const pollDeadline = Date.now() + 240000;
   while (Date.now() < pollDeadline) {
     if (!(await looksLikeLoginPage(context))) break;
     await page.waitForTimeout(800);
