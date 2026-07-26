@@ -1,41 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  Button,
-  Modal,
-  Pagination,
-  Radio,
-  Select,
-  Space,
-  Table,
-  Tag,
-  Tooltip,
-  Typography,
-  message,
-} from "antd";
-import {
-  AppstoreOutlined,
-  CopyOutlined,
-  DownloadOutlined,
-  ExportOutlined,
-  ReloadOutlined,
-  UnorderedListOutlined,
-} from "@ant-design/icons";
+import { Button, Pagination, Space, Table, Tag, Tooltip, Typography, message } from "antd";
+import { CopyOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useLocation, useOutletContext } from "react-router-dom";
-import { api } from "../../api/client";
 import { hoursDeviation, STAGE_COLORS } from "../../api/types";
 import type { Ticket } from "../../api/types";
-import { useAuthStore } from "../../store/auth";
 import { useFilteredTicketsStore } from "../../store/filteredTickets";
 import { useTickets } from "./useTickets";
 import type { TicketFilters } from "./useTickets";
 import FilterBar from "./FilterBar";
 import DetailDrawer from "./DetailDrawer";
-import KanbanView from "./KanbanView";
 import "./TicketCenter.css";
 
 export default function TicketCenter() {
-  const { user } = useAuthStore();
   const { refreshTick } = useOutletContext<{ refreshTick: number }>();
   const location = useLocation();
   const [filters, setFilters] = useState<TicketFilters>({
@@ -45,13 +22,8 @@ export default function TicketCenter() {
   });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [view, setView] = useState<"list" | "kanban">("list");
-  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
-  const [batchTransferOpen, setBatchTransferOpen] = useState(false);
-  const [localRefresh, setLocalRefresh] = useState(0);
 
   // 支持从头部"我负责的工单"等入口重复导航到 /tickets 时，也能重新应用筛选条件
   useEffect(() => {
@@ -67,12 +39,7 @@ export default function TicketCenter() {
     publishFilters(filters);
   }, [filters, publishFilters]);
 
-  const { data, total, facets, loading, reload } = useTickets(
-    filters,
-    page,
-    pageSize,
-    refreshTick + localRefresh
-  );
+  const { data, total, facets, loading, reload } = useTickets(filters, page, pageSize, refreshTick);
 
   const lastTicket = useMemo(
     () => data.find((t) => t.id === activeTicketId) ?? null,
@@ -82,24 +49,6 @@ export default function TicketCenter() {
   function openDetail(id: string) {
     setActiveTicketId(id);
     setDetailOpen(true);
-  }
-
-  async function handleClaim(t: Ticket) {
-    if (!user) return;
-    await api.post(`/tickets/${t.id}/claim`, { actor: user.name });
-    message.success(`已接单：${t.code}`);
-    reload();
-  }
-
-  async function handleExport(groupBy?: "requester" | "itHandler") {
-    const res = await api.post("/export", { ...filters, groupBy }, { responseType: "blob" });
-    const url = URL.createObjectURL(res.data);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "工单导出.zip";
-    a.click();
-    URL.revokeObjectURL(url);
-    setExportOpen(false);
   }
 
   const columns: ColumnsType<Ticket> = [
@@ -215,89 +164,48 @@ export default function TicketCenter() {
     {
       title: "操作",
       fixed: "right",
-      width: 130,
-      render: (_, r) => (
-        <Space size={4}>
-          <a onClick={() => openDetail(r.id)}>详情</a>
-          <a onClick={() => handleClaim(r)}>接单</a>
-          <TransferAction ticket={r} handlers={facets.itHandlers} onDone={reload} />
-        </Space>
-      ),
+      width: 70,
+      render: (_, r) => <a onClick={() => openDetail(r.id)}>详情</a>,
     },
   ];
 
   return (
     <div className="ticket-center-page">
-      <div className="tc-toolbar">
-        <Space>
-          <Button
-            disabled={selectedKeys.length === 0}
-            onClick={() => setBatchTransferOpen(true)}
-          >
-            批量转交（{selectedKeys.length}）
-          </Button>
-          <Button icon={<ExportOutlined />} onClick={() => setExportOpen(true)}>
-            导出
-          </Button>
-        </Space>
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={() => setLocalRefresh((x) => x + 1)} />
-          <Radio.Group value={view} onChange={(e) => setView(e.target.value)}>
-            <Radio.Button value="list">
-              <UnorderedListOutlined /> 列表
-            </Radio.Button>
-            <Radio.Button value="kanban">
-              <AppstoreOutlined /> 看板
-            </Radio.Button>
-          </Radio.Group>
-        </Space>
-      </div>
-
       <FilterBar filters={filters} onChange={setFilters} facets={facets} />
 
       <div className="tc-table-card">
-        {view === "list" ? (
-          <>
-            <Table
-              rowKey="id"
-              size="small"
-              loading={loading}
-              dataSource={data}
-              columns={columns}
-              pagination={false}
-              scroll={{ x: 2400, y: "calc(100vh - 420px)" }}
-              rowSelection={{
-                selectedRowKeys: selectedKeys,
-                onChange: setSelectedKeys,
-              }}
-              rowClassName={(r) => (r.urgent ? "row-urgent" : "")}
-              onChange={(_, __, sorter: any) => {
-                if (sorter?.field) {
-                  setFilters((f) => ({
-                    ...f,
-                    sortField: sorter.field,
-                    sortOrder: sorter.order === "ascend" ? "asc" : "desc",
-                  }));
-                }
-              }}
-            />
-            <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
-              <Pagination
-                current={page}
-                pageSize={pageSize}
-                total={total}
-                showSizeChanger
-                showTotal={(t) => `共 ${t} 条`}
-                onChange={(p, ps) => {
-                  setPage(p);
-                  setPageSize(ps);
-                }}
-              />
-            </div>
-          </>
-        ) : (
-          <KanbanView tickets={data} onOpen={openDetail} />
-        )}
+        <Table
+          rowKey="id"
+          size="small"
+          loading={loading}
+          dataSource={data}
+          columns={columns}
+          pagination={false}
+          scroll={{ x: 2400, y: "calc(100vh - 420px)" }}
+          rowClassName={(r) => (r.urgent ? "row-urgent" : "")}
+          onChange={(_, __, sorter: any) => {
+            if (sorter?.field) {
+              setFilters((f) => ({
+                ...f,
+                sortField: sorter.field,
+                sortOrder: sorter.order === "ascend" ? "asc" : "desc",
+              }));
+            }
+          }}
+        />
+        <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+          <Pagination
+            current={page}
+            pageSize={pageSize}
+            total={total}
+            showSizeChanger
+            showTotal={(t) => `共 ${t} 条`}
+            onChange={(p, ps) => {
+              setPage(p);
+              setPageSize(ps);
+            }}
+          />
+        </div>
       </div>
 
       <div className="floating-actions">
@@ -328,107 +236,6 @@ export default function TicketCenter() {
         onClose={() => setDetailOpen(false)}
         onSaved={reload}
       />
-
-      <Modal
-        title="导出工单"
-        open={exportOpen}
-        onCancel={() => setExportOpen(false)}
-        footer={null}
-      >
-        <p>导出将按当前列表筛选条件生成 Excel（真实 xlsx），多文件将自动打包为压缩包。</p>
-        <Space direction="vertical" style={{ width: "100%" }}>
-          <Button block icon={<DownloadOutlined />} onClick={() => handleExport()}>
-            按当前筛选导出（单文件）
-          </Button>
-          <Button block icon={<DownloadOutlined />} onClick={() => handleExport("requester")}>
-            按发起人导出（每人一个文件）
-          </Button>
-          <Button block icon={<DownloadOutlined />} onClick={() => handleExport("itHandler")}>
-            按 IT 受理人导出（每人一个文件）
-          </Button>
-        </Space>
-      </Modal>
-
-      <BatchTransferModal
-        open={batchTransferOpen}
-        onClose={() => setBatchTransferOpen(false)}
-        handlers={facets.itHandlers}
-        onConfirm={async (target) => {
-          if (!user) return;
-          await Promise.all(
-            selectedKeys.map((id) => api.post(`/tickets/${id}/transfer`, { actor: user.name, to: target }))
-          );
-          message.success(`已批量转交 ${selectedKeys.length} 条工单`);
-          setSelectedKeys([]);
-          setBatchTransferOpen(false);
-          reload();
-        }}
-      />
     </div>
-  );
-}
-
-function TransferAction({
-  ticket,
-  handlers,
-  onDone,
-}: {
-  ticket: Ticket;
-  handlers: string[];
-  onDone: () => void;
-}) {
-  const { user } = useAuthStore();
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <a onClick={() => setOpen(true)}>转交</a>
-      <Modal
-        title={`转交工单 ${ticket.code}`}
-        open={open}
-        onCancel={() => setOpen(false)}
-        onOk={async () => {
-          setOpen(false);
-        }}
-        footer={null}
-      >
-        <Select
-          style={{ width: "100%" }}
-          placeholder="选择接收人"
-          options={handlers.map((h) => ({ value: h, label: h }))}
-          onChange={async (val) => {
-            if (!user) return;
-            await api.post(`/tickets/${ticket.id}/transfer`, { actor: user.name, to: val });
-            message.success(`已转交给 ${val}`);
-            setOpen(false);
-            onDone();
-          }}
-        />
-      </Modal>
-    </>
-  );
-}
-
-function BatchTransferModal({
-  open,
-  onClose,
-  handlers,
-  onConfirm,
-}: {
-  open: boolean;
-  onClose: () => void;
-  handlers: string[];
-  onConfirm: (target: string) => void;
-}) {
-  const [target, setTarget] = useState<string>();
-  return (
-    <Modal title="批量转交" open={open} onCancel={onClose} onOk={() => target && onConfirm(target)}>
-      <Select
-        style={{ width: "100%" }}
-        placeholder="选择接收人"
-        options={handlers.map((h) => ({ value: h, label: h }))}
-        value={target}
-        onChange={setTarget}
-      />
-    </Modal>
   );
 }
