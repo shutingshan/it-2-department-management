@@ -65,14 +65,16 @@ async function dumpDebug(context: BrowserContext, label: string) {
 }
 
 // 粗略判断当前是否处于"未登录"状态：URL 带 login/passport/sso 关键字，
-// 或页面上出现明显的二维码元素（TAPD 统一登录页通常会展示扫码登录的二维码图片）
+// 或页面上出现明显带"qrcode"字样的二维码元素（TAPD 统一登录页通常会展示扫码登录的二维码图片）。
+// 注意：不能拿裸的 canvas 标签当信号——实测已登录的正常工作台页面上也会有跟登录完全无关的
+// canvas 元素（图表、头像之类），拿它判断"是否已登录"会把已登录状态误判成"还没登录/登录过期"
 async function looksLoggedOut(context: BrowserContext): Promise<boolean> {
   const page = context.pages()[0];
   if (!page) return true;
   const url = page.url();
   if (/passport|login|sso/i.test(url)) return true;
   const qrCount = await page
-    .locator('img[src*="qrcode" i], canvas, [class*="qrcode" i], [class*="qr-code" i]')
+    .locator('img[src*="qrcode" i], [class*="qrcode" i], [class*="qr-code" i]')
     .count()
     .catch(() => 0);
   return qrCount > 0;
