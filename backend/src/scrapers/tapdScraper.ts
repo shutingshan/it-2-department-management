@@ -119,6 +119,17 @@ async function clickToNavigate(page: Page, url: string) {
     const a = document.createElement("a");
     a.id = "__tapd_auto_nav__";
     a.href = href;
+    // 之前抓到的真实页面 HTML 里，TAPD 自己内部的链接除了普通 href，还带着 fe-link（空属性，
+    // 前端路由用来识别"这是一次应用内跳转"）和 link（不带域名的相对路径）这两个属性；
+    // 我们插入的这个链接原来只有 href，很可能没被它自己的路由监听逻辑识别成"真的点了内部链接"，
+    // 只是当成普通整页跳转处理——补上这两个属性，尽量让它更像一个真的应用内链接
+    a.setAttribute("fe-link", "");
+    try {
+      const parsed = new URL(href);
+      a.setAttribute("link", parsed.pathname.replace(/^\/tapd_fe/, ""));
+    } catch {
+      // ignore
+    }
     a.textContent = "auto-nav";
     a.style.position = "fixed";
     // 左上角 (0,0) 那个位置正好是TAPD自己的logo/侧边栏收起按钮所在区域，之前测试发现点在
