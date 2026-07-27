@@ -113,14 +113,21 @@ async function waitForContentToLoad(page: Page, timeoutMs = 240000) {
 // 模拟一次真实点击就能绕开
 async function clickToNavigate(page: Page, url: string) {
   await page.evaluate((href) => {
+    document.getElementById("__tapd_auto_nav__")?.remove();
     const a = document.createElement("a");
     a.id = "__tapd_auto_nav__";
     a.href = href;
+    a.textContent = "auto-nav";
     a.style.position = "fixed";
-    a.style.top = "0";
-    a.style.left = "0";
-    a.style.width = "1px";
-    a.style.height = "1px";
+    // 左上角 (0,0) 那个位置正好是TAPD自己的logo/侧边栏收起按钮所在区域，之前测试发现点在
+    // 那里会连带点到TAPD页面自身的导航元素，弹出一堆多余窗口；改到页面正中间、给最高
+    // z-index，确保点到的一定是我们自己插入的这个元素，不会被其他真实UI元素挡住或顶替
+    a.style.top = "50%";
+    a.style.left = "50%";
+    a.style.width = "20px";
+    a.style.height = "20px";
+    a.style.zIndex = "2147483647";
+    a.style.background = "#fff";
     document.body.appendChild(a);
   }, url);
   const nav = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 240000 }).catch(() => {});
