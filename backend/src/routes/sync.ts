@@ -1,6 +1,6 @@
 import { Router } from "express";
 import dayjs from "dayjs";
-import { Browser, BrowserContext } from "playwright";
+import { Browser, BrowserContext, Page } from "playwright";
 import { store } from "../store";
 import { resolveStage } from "../mapping";
 import { fetchTapdDelta } from "../adapters/tapd";
@@ -332,8 +332,8 @@ export async function syncSingleTicketTapd(ticket: Ticket, actor: string): Promi
   const time = () => dayjs().format("YYYY-MM-DD HH:mm:ss");
   try {
     browser = await launchTapdBrowser();
-    const context = await getTapdAuthenticatedContext(browser);
-    const fields = await scrapeTapdStoryFields(context, ticket.tapdUrl);
+    const { page } = await getTapdAuthenticatedContext(browser);
+    const fields = await scrapeTapdStoryFields(page, ticket.tapdUrl);
     applyTapdFields(ticket, fields);
     ticket.tapdErrorNote = null;
     store.addLog({
@@ -400,9 +400,10 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
   (async () => {
     let browser: Browser | null = null;
     let context: BrowserContext | null = null;
+    let page: Page | null = null;
     try {
       browser = await launchTapdBrowser();
-      context = await getTapdAuthenticatedContext(browser);
+      ({ context, page } = await getTapdAuthenticatedContext(browser));
     } catch (e) {
       const reason = (e as Error).message ?? "TAPD 登录态无效";
       job.status = "failed";
@@ -424,6 +425,7 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
     }
 
     const authedContext = context;
+    const authedPage = page;
     let idx = 0;
     stopJobTimer();
     jobTimer = setInterval(async () => {
@@ -445,7 +447,7 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
         }
         ticketsSyncingTapd.add(ticket.id);
         try {
-          const fields = await scrapeTapdStoryFields(authedContext, ticket.tapdUrl!);
+          const fields = await scrapeTapdStoryFields(authedPage, ticket.tapdUrl!);
           applyTapdFields(ticket, fields);
           ticket.tapdErrorNote = null; // 本次同步成功，清除历史异常标记
           job.success += 1;

@@ -11,7 +11,7 @@
  */
 import fs from "fs";
 import path from "path";
-import { BrowserContext, Frame, Page } from "playwright";
+import { Frame, Page } from "playwright";
 import { config } from "../config";
 import { isWafBlocked } from "./tapdAuth";
 
@@ -139,59 +139,57 @@ async function clickToNavigate(page: Page, url: string) {
   await page.waitForTimeout(3000);
 }
 
-export async function scrapeTapdStoryFields(context: BrowserContext, tapdUrl: string): Promise<TapdStoryFields> {
-  const page = await context.newPage();
-  try {
-    // 实测：全新页面直接硬跳转到需求详情深链接，会被应用自己重定向回该空间的"需求列表"页
-    // （用户在自己日常登录的浏览器里直接访问同一个地址是正常的），先访问一次列表页热身也没用；
-    // 改成先到列表页，再用真实点击（而非 page.goto）跳到具体详情地址
-    const listUrl = tapdUrl.replace(/\/story\/detail\/.+$/, "/story/list");
-    if (listUrl !== tapdUrl) {
-      await page.goto(listUrl, { waitUntil: "domcontentloaded", timeout: 240000 }).catch(() => {});
-      await waitForContentToLoad(page);
-      await clickToNavigate(page, tapdUrl);
-    } else {
-      await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 240000 });
-    }
+// page 必须是已经从 TAPD 首页/工作台开始、连续导航过来的同一个页面（见 tapdAuth.ts 的
+// getTapdAuthenticatedContext），不能每次都另开一个全新页面直接硬跳转到需求详情——
+// 实测发现：全新页面无论是 page.goto() 硬跳转还是模拟真实点击，只要没有从首页开始过，
+// 都会被应用自己重定向回需求列表页；只有像真实用户那样"先进首页、再一路点过去"，
+// 在同一个页面里连续导航，才能真正停留在具体的需求详情上
+export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promise<TapdStoryFields> {
+  // 实测：直接跳到需求详情深链接会被应用自己重定向回该空间的"需求列表"页
+  // （用户在自己日常登录的浏览器里直接访问同一个地址是正常的），所以先到列表页，
+  // 再用真实点击（而非 page.goto）跳到具体详情地址，模拟真实"先进列表、再点进详情"的路径
+  const listUrl = tapdUrl.replace(/\/story\/detail\/.+$/, "/story/list");
+  if (listUrl !== tapdUrl) {
+    await page.goto(listUrl, { waitUntil: "domcontentloaded", timeout: 240000 }).catch(() => {});
     await waitForContentToLoad(page);
-
-    // 安全网关（如腾讯云WAF）拦截返回的是一个跟TAPD毫不相关的403页面，抓不到字段是必然的；
-    // 单独识别出来才能给准确的错误原因，而不是被误判成"页面结构不对，需要调整选择器"
-    if (await isWafBlocked(page)) {
-      await dumpDebug(page, "waf-blocked");
-      throw new Error("访问TAPD需求详情页被安全网关拦截（浏览器被识别为自动化工具），需要调整反检测配置");
-    }
-
-    const targets: Locatable[] = [page, ...page.frames()];
-
-    async function findLabel(...labels: string[]): Promise<string | null> {
-      for (const label of labels) {
-        for (const target of targets) {
-          const v = await getFieldValueByLabel(target, label);
-          if (v) return v;
-        }
-      }
-      return null;
-    }
-
-    const tapdStatus = await findLabel("状态");
-    const estimatedHours = parseHours(await findLabel("预估工时"));
-    const actualHours = parseHours(await findLabel("完成工时", "消耗工时"));
-    const developer = parseNameList(await findLabel("开发人员"));
-    const currentHandler = await findLabel("处理人", "当前处理人");
-
-    const gotAnything = tapdStatus || estimatedHours !== null || actualHours !== null || developer.length || currentHandler;
-    if (!gotAnything) {
-      await dumpDebug(page, "no-fields-matched");
-      throw new Error(
-        "未能识别到任何TAPD字段，页面结构可能与预期不符（选择器为通用猜测，需要根据真实页面调整）"
-      );
-    }
-
-    return { tapdStatus, estimatedHours, actualHours, developer, currentHandler };
-  } finally {
-    // 关闭前留一点缓冲时间，避免页面上还有没跑完的逻辑就被强制中断
-    await page.waitForTimeout(2000).catch(() => {});
-    await page.close().catch(() => {});
+    await clickToNavigate(page, tapdUrl);
+  } else {
+    await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 240000 });
   }
+  await waitForContentToLoad(page);
+
+  // 安全网关（如腾讯云WAF）拦截返回的是一个跟TAPD毫不相关的403页面，抓不到字段是必然的；
+  // 单独识别出来才能给准确的错误原因，而不是被误判成"页面结构不对，需要调整选择器"
+  if (await isWafBlocked(page)) {
+    await dumpDebug(page, "waf-blocked");
+    throw new Error("访问TAPD需求详情页被安全网关拦截（浏览器被识别为自动化工具），需要调整反检测配置");
+  }
+
+  const targets: Locatable[] = [page, ...page.frames()];
+
+  async function findLabel(...labels: string[]): Promise<string | null> {
+    for (const label of labels) {
+      for (const target of targets) {
+        const v = await getFieldValueByLabel(target, label);
+        if (v) return v;
+      }
+    }
+    return null;
+  }
+
+  const tapdStatus = await findLabel("状态");
+  const estimatedHours = parseHours(await findLabel("预估工时"));
+  const actualHours = parseHours(await findLabel("完成工时", "消耗工时"));
+  const developer = parseNameList(await findLabel("开发人员"));
+  const currentHandler = await findLabel("处理人", "当前处理人");
+
+  const gotAnything = tapdStatus || estimatedHours !== null || actualHours !== null || developer.length || currentHandler;
+  if (!gotAnything) {
+    await dumpDebug(page, "no-fields-matched");
+    throw new Error(
+      "未能识别到任何TAPD字段，页面结构可能与预期不符（选择器为通用猜测，需要根据真实页面调整）"
+    );
+  }
+
+  return { tapdStatus, estimatedHours, actualHours, developer, currentHandler };
 }

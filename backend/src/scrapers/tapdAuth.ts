@@ -127,8 +127,14 @@ async function newStealthContext(browser: Browser, storageState?: string): Promi
 
 // 自动同步（单条点击同步、批量获取TAPD信息、每日定时任务）调用：只复用已保存的登录态，
 // 登录态无效则直接抛错。非无头模式运行，会自动弹出一个可见的浏览器窗口完成后续操作，
-// 全程无需人工干预，但需要机器上有真实图形界面（同 `npm run tapd:login` 的前提）
-export async function getTapdAuthenticatedContext(browser: Browser): Promise<BrowserContext> {
+// 全程无需人工干预，但需要机器上有真实图形界面（同 `npm run tapd:login` 的前提）。
+//
+// 返回的 page 就是这里用来验证登录态、已经从首页/工作台热启动过的那个页面，调用方要
+// 一直复用它去访问具体需求详情（而不是另开一个全新页面）——实测发现：全新页面不管是
+// page.goto() 硬跳转还是模拟真实点击，只要没有从首页开始过、上来就直接访问需求详情/
+// 列表深链接，都会被应用自己重定向回需求列表页；只有像真实用户那样"先进首页、再一路
+// 点过去"，同一个页面里连续导航，才能真正停留在具体的需求详情上
+export async function getTapdAuthenticatedContext(browser: Browser): Promise<{ context: BrowserContext; page: Page }> {
   ensureDirs();
   if (!fs.existsSync(STATE_PATH)) {
     throw new Error(
@@ -152,10 +158,7 @@ export async function getTapdAuthenticatedContext(browser: Browser): Promise<Bro
       "TAPD 登录态已过期：请在有屏幕的本机重新执行一次 `npm run tapd:login` 扫码登录后再重试同步。"
     );
   }
-  // 这个页面只是用来验证登录态，检查完就关掉——不然它会一直停在"我的工作台"，
-  // 让人误以为同步"进错了页面"，实际抓取是 scrapeTapdStoryFields 另开的新页面
-  await page.close();
-  return context;
+  return { context, page };
 }
 
 // 交互式登录（仅供 tapdLogin.ts 调用）：非无头模式打开浏览器，人工完成登录（可能需要先点"登录"
