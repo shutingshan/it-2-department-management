@@ -95,7 +95,9 @@ async function waitForContentToLoad(page: Page, timeoutMs = 240000) {
     try {
       const text = await page.evaluate(() => document.body?.innerText?.trim().length ?? 0);
       if (text > 0) {
-        await page.waitForTimeout(1000);
+        // 页面上出现文字不代表异步数据/后续脚本（含可能的跳转）都跑完了，多等几秒让它彻底稳定，
+        // 避免过早去读字段/过早关闭页面时,还有没执行完的逻辑
+        await page.waitForTimeout(5000);
         return;
       }
     } catch {
@@ -133,6 +135,8 @@ async function clickToNavigate(page: Page, url: string) {
   const nav = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 240000 }).catch(() => {});
   await page.click("#__tapd_auto_nav__");
   await nav;
+  // 跳转落地后再缓一缓，给页面上可能还在跑的重定向/异步逻辑留出时间，避免立刻接着操作页面
+  await page.waitForTimeout(3000);
 }
 
 export async function scrapeTapdStoryFields(context: BrowserContext, tapdUrl: string): Promise<TapdStoryFields> {
@@ -186,6 +190,8 @@ export async function scrapeTapdStoryFields(context: BrowserContext, tapdUrl: st
 
     return { tapdStatus, estimatedHours, actualHours, developer, currentHandler };
   } finally {
-    await page.close();
+    // 关闭前留一点缓冲时间，避免页面上还有没跑完的逻辑就被强制中断
+    await page.waitForTimeout(2000).catch(() => {});
+    await page.close().catch(() => {});
   }
 }
