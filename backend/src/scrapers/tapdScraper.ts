@@ -88,8 +88,8 @@ export interface TapdStoryFields {
 }
 
 // TAPD 需求详情页数据多为异步加载，页面骨架可能先于实际字段渲染出来（实测首次渲染可能较慢，
-// 跟当曲云类似）；最多等 4 分钟让内容真正加载完，而不是固定睡一小段时间就去抓取
-async function waitForContentToLoad(page: Page, timeoutMs = 240000) {
+// 跟当曲云类似）；最多等 10 分钟让内容真正加载完，而不是固定睡一小段时间就去抓取
+async function waitForContentToLoad(page: Page, timeoutMs = 600000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -132,7 +132,7 @@ async function clickToNavigate(page: Page, url: string) {
     a.style.background = "#fff";
     document.body.appendChild(a);
   }, url);
-  const nav = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 240000 }).catch(() => {});
+  const nav = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 600000 }).catch(() => {});
   await page.click("#__tapd_auto_nav__");
   await nav;
   // 跳转落地后再缓一缓，给页面上可能还在跑的重定向/异步逻辑留出时间，避免立刻接着操作页面
@@ -162,13 +162,13 @@ export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promis
   // 再用真实点击（而非 page.goto，会被同样的机制拦截/取消导航）跳到具体详情地址
   const listUrl = deriveWorkspaceListUrl(tapdUrl);
   if (listUrl) {
-    await page.goto(listUrl, { waitUntil: "domcontentloaded", timeout: 240000 }).catch(() => {});
+    await page.goto(listUrl, { waitUntil: "domcontentloaded", timeout: 600000 }).catch(() => {});
     await waitForContentToLoad(page);
     await clickToNavigate(page, tapdUrl);
   } else {
     // 极少数情况下解析不出空间 id，退化成直接跳转；net::ERR_ABORTED 常见于目标页面自己
     // 用客户端路由拦截、取消了这次导航（页面实际可能已经正确切换过去了），不能当成致命错误
-    await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 240000 }).catch(() => {});
+    await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 600000 }).catch(() => {});
   }
   await waitForContentToLoad(page);
 
