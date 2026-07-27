@@ -108,6 +108,16 @@ async function waitForContentToLoad(page: Page, timeoutMs = 240000) {
 export async function scrapeTapdStoryFields(context: BrowserContext, tapdUrl: string): Promise<TapdStoryFields> {
   const page = await context.newPage();
   try {
+    // 实测：全新页面直接硬跳转到需求详情深链接，会被应用自己重定向回该空间的"需求列表"页
+    // （用户在自己日常登录的浏览器里直接访问同一个地址是正常的，只有全新会话直接跳转才会这样，
+    // 猜测前端需要先在列表页建立客户端状态）。所以先访问一次该空间的需求列表页"热身"，
+    // 再跳转到具体详情地址，模拟真实"先进列表、再点进详情"的浏览路径
+    const listUrl = tapdUrl.replace(/\/story\/detail\/.+$/, "/story/list");
+    if (listUrl !== tapdUrl) {
+      await page.goto(listUrl, { waitUntil: "domcontentloaded", timeout: 240000 }).catch(() => {});
+      await waitForContentToLoad(page);
+    }
+
     await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 240000 });
     await waitForContentToLoad(page);
 
