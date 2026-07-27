@@ -155,7 +155,10 @@ function TapdLinkCell({ ticket, onSynced }: { ticket: Ticket; onSynced: () => vo
     if (!user || syncing) return;
     setSyncing(true);
     try {
-      await api.post(`/sync/tapd/${ticket.id}`, { actor: user.name });
+      // 单条TAPD同步要走完整登录检查+跳转列表+点击跳转详情+等待内容加载一整套流程，
+      // 可能耗时数分钟；用全局默认的15秒超时的话，前端会在后端还在正常跑的时候就先放弃，
+      // 用户看不到反馈、误以为没反应而重复点击其他工单，导致后台越攒越多同时在跑的浏览器窗口
+      await api.post(`/sync/tapd/${ticket.id}`, { actor: user.name }, { timeout: 900000 });
       message.success(`工单 ${ticket.code} 的TAPD信息已同步`);
       onSynced();
     } catch (e: any) {
