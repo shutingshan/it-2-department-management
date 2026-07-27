@@ -105,20 +105,43 @@ async function waitForContentToLoad(page: Page, timeoutMs = 240000) {
   }
 }
 
+// 先在列表页里插入一个真的 <a> 元素，再用 Playwright 的 click（会派发真实的、浏览器
+// 认可的"用户点击"事件）去点它触发导航——而不是 page.goto()。用户手动在自己浏览器里粘贴
+// 同一个地址是正常的，但我们全新会话里 page.goto() 硬跳转会被重定向回列表页；两者的关键区别
+// 之一是 page.goto() 属于脚本发起的导航，浏览器不会把它标记成"真实用户操作"（Chrome 只有
+// 真实点击/地址栏回车才会带上这个标记），如果安全网关按这个标记区分"疑似自动化"的深链接访问，
+// 模拟一次真实点击就能绕开
+async function clickToNavigate(page: Page, url: string) {
+  await page.evaluate((href) => {
+    const a = document.createElement("a");
+    a.id = "__tapd_auto_nav__";
+    a.href = href;
+    a.style.position = "fixed";
+    a.style.top = "0";
+    a.style.left = "0";
+    a.style.width = "1px";
+    a.style.height = "1px";
+    document.body.appendChild(a);
+  }, url);
+  const nav = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 240000 }).catch(() => {});
+  await page.click("#__tapd_auto_nav__");
+  await nav;
+}
+
 export async function scrapeTapdStoryFields(context: BrowserContext, tapdUrl: string): Promise<TapdStoryFields> {
   const page = await context.newPage();
   try {
     // 实测：全新页面直接硬跳转到需求详情深链接，会被应用自己重定向回该空间的"需求列表"页
-    // （用户在自己日常登录的浏览器里直接访问同一个地址是正常的，只有全新会话直接跳转才会这样，
-    // 猜测前端需要先在列表页建立客户端状态）。所以先访问一次该空间的需求列表页"热身"，
-    // 再跳转到具体详情地址，模拟真实"先进列表、再点进详情"的浏览路径
+    // （用户在自己日常登录的浏览器里直接访问同一个地址是正常的），先访问一次列表页热身也没用；
+    // 改成先到列表页，再用真实点击（而非 page.goto）跳到具体详情地址
     const listUrl = tapdUrl.replace(/\/story\/detail\/.+$/, "/story/list");
     if (listUrl !== tapdUrl) {
       await page.goto(listUrl, { waitUntil: "domcontentloaded", timeout: 240000 }).catch(() => {});
       await waitForContentToLoad(page);
+      await clickToNavigate(page, tapdUrl);
+    } else {
+      await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 240000 });
     }
-
-    await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 240000 });
     await waitForContentToLoad(page);
 
     // 安全网关（如腾讯云WAF）拦截返回的是一个跟TAPD毫不相关的403页面，抓不到字段是必然的；
