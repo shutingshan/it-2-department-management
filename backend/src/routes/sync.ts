@@ -7,7 +7,7 @@ import { fetchTapdDelta } from "../adapters/tapd";
 import { SyncJob } from "../store";
 import { ScrapedRow, scrapeDangquyunTicketList } from "../scrapers/dangquyunScraper";
 import { mapScrapedRowToTicket } from "../scrapers/dangquyunMapper";
-import { getHeadlessAuthenticatedContext, launchHeadlessBrowser } from "../scrapers/tapdAuth";
+import { getTapdAuthenticatedContext, launchTapdBrowser } from "../scrapers/tapdAuth";
 import { scrapeTapdStoryFields, TapdStoryFields } from "../scrapers/tapdScraper";
 import { applyFilters, parseQuery, TicketQuery } from "../filter";
 import { Ticket } from "../types";
@@ -331,8 +331,8 @@ export async function syncSingleTicketTapd(ticket: Ticket, actor: string): Promi
   let browser: Browser | null = null;
   const time = () => dayjs().format("YYYY-MM-DD HH:mm:ss");
   try {
-    browser = await launchHeadlessBrowser();
-    const context = await getHeadlessAuthenticatedContext(browser);
+    browser = await launchTapdBrowser();
+    const context = await getTapdAuthenticatedContext(browser);
     const fields = await scrapeTapdStoryFields(context, ticket.tapdUrl);
     applyTapdFields(ticket, fields);
     ticket.tapdErrorNote = null;
@@ -375,8 +375,8 @@ router.post("/tapd/:id", async (req, res) => {
 });
 
 // 获取TAPD信息：供路由与定时任务共用；不传 filters 时默认仅覆盖未完成未关闭且有TAPD地址的数据。
-// 按条更新（每条各自开一个页面抓取），整个任务共用一个已登录的浏览器上下文；
-// 若登录态无效/已过期，任务直接整体失败（不会在服务器上弹出无人可见的扫码窗口）
+// 按条更新（每条各自开一个页面抓取），整个任务共用一个已登录的浏览器上下文（非无头模式，
+// 会自动弹出一个可见的浏览器窗口全自动完成，不需要人工干预）；若登录态无效/已过期，任务直接整体失败
 export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; done: Promise<SyncJob> } {
   const candidates = resolveCandidates(filters).filter((t) => t.tapdUrl);
   const job: SyncJob = {
@@ -401,8 +401,8 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
     let browser: Browser | null = null;
     let context: BrowserContext | null = null;
     try {
-      browser = await launchHeadlessBrowser();
-      context = await getHeadlessAuthenticatedContext(browser);
+      browser = await launchTapdBrowser();
+      context = await getTapdAuthenticatedContext(browser);
     } catch (e) {
       const reason = (e as Error).message ?? "TAPD 登录态无效";
       job.status = "failed";
