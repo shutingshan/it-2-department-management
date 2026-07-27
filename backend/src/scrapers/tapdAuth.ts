@@ -150,6 +150,9 @@ export async function getTapdAuthenticatedContext(browser: Browser): Promise<Bro
       "TAPD 登录态已过期：请在有屏幕的本机重新执行一次 `npm run tapd:login` 扫码登录后再重试同步。"
     );
   }
+  // 这个页面只是用来验证登录态，检查完就关掉——不然它会一直停在"我的工作台"，
+  // 让人误以为同步"进错了页面"，实际抓取是 scrapeTapdStoryFields 另开的新页面
+  await page.close();
   return context;
 }
 
