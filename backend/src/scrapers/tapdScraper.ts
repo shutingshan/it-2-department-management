@@ -87,9 +87,9 @@ export interface TapdStoryFields {
   currentHandler: string | null;
 }
 
-// TAPD 需求详情页数据多为异步加载，页面骨架可能先于实际字段渲染出来；
-// 最多等 2 分钟让内容真正加载完，而不是固定睡一小段时间就去抓取
-async function waitForContentToLoad(page: Page, timeoutMs = 120000) {
+// TAPD 需求详情页数据多为异步加载，页面骨架可能先于实际字段渲染出来（实测首次渲染可能较慢，
+// 跟当曲云类似）；最多等 4 分钟让内容真正加载完，而不是固定睡一小段时间就去抓取
+async function waitForContentToLoad(page: Page, timeoutMs = 240000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -108,7 +108,7 @@ async function waitForContentToLoad(page: Page, timeoutMs = 120000) {
 export async function scrapeTapdStoryFields(context: BrowserContext, tapdUrl: string): Promise<TapdStoryFields> {
   const page = await context.newPage();
   try {
-    await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
+    await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 240000 });
     await waitForContentToLoad(page);
 
     // 安全网关（如腾讯云WAF）拦截返回的是一个跟TAPD毫不相关的403页面，抓不到字段是必然的；

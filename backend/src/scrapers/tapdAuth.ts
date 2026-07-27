@@ -33,8 +33,8 @@ function ensureDirs() {
 }
 
 async function gotoAndSettle(page: Page, url: string) {
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120000 });
-  const deadline = Date.now() + 120000;
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 240000 });
+  const deadline = Date.now() + 240000;
   while (Date.now() < deadline) {
     try {
       const text = await page.evaluate(() => document.body?.innerText?.trim().length ?? 0);
