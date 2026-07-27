@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { Frame, Page } from "playwright";
 import { getAuthenticatedContext, launchBrowser } from "./dangquyunAuth";
+import { config } from "../config";
 
 const DEBUG_DIR = path.join(__dirname, "../../.auth/debug");
 const MAX_PAGES = 60; // 安全上限，防止分页逻辑出问题时无限翻页
@@ -206,11 +207,33 @@ function dedupeByCode(allRows: ScrapedRow[]): ScrapedRow[] {
   return Array.from(map.values());
 }
 
+// 去掉查询字符串和结尾斜杠再比较，容忍页面自己在 URL 后面附加的无关参数/尾部斜杠差异，
+// 但仍能识别出"跑到了完全不同的地址"（比如登录跳转异常、网站改版换了路径）
+function normalizeUrl(url: string): string {
+  return url.split("?")[0].replace(/\/+$/, "");
+}
+
 export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
   const browser = await launchBrowser();
   try {
     const context = await getAuthenticatedContext(browser);
     const page = context.pages()[0] ?? (await context.newPage());
+
+    // 登录/跳转流程走完后，最终停留的地址必须是 .env 里配置的 DANGQUYUN_TARGET_URL——
+    // 如果因为登录跳转异常、网站改版换了地址等原因跑到了别的网址，后面抓到的数据大概率
+    // 是错的（或者压根不是工单列表），这里直接判定本次抓取无效，不继续处理任何数据
+    const expectedUrl = normalizeUrl(config.dangquyun.targetUrl);
+    const actualUrl = normalizeUrl(page.url());
+    if (actualUrl !== expectedUrl) {
+      fs.mkdirSync(DEBUG_DIR, { recursive: true });
+      const stamp = Date.now();
+      await page.screenshot({ path: path.join(DEBUG_DIR, `${stamp}-wrong-target-url.png`), fullPage: true }).catch(() => {});
+      fs.writeFileSync(path.join(DEBUG_DIR, `${stamp}-wrong-target-url.html`), await page.content().catch(() => ""));
+      throw new Error(
+        `抓取时页面最终停留的地址与配置不符（期望：${expectedUrl}，实际：${actualUrl}），` +
+          `可能是登录跳转异常或网站改版，本次抓取判定无效`
+      );
+    }
 
     // 很多低代码平台把实际业务内容渲染在 iframe 里，主页面本身可能只是个空壳，
     // 所以要连同页面里所有 iframe 一起找，而不只是主页面
