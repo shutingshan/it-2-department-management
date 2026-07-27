@@ -5,8 +5,6 @@ import { runFetchNew, startTapdJob, startUpdateTicketsJob } from "./routes/sync"
 const SCHEDULED_ACTOR = "定时任务";
 const TARGET_MINUTES = 18 * 60 + 30; // 北京时间 18:30
 
-let lastRunDate: string | null = null;
-
 function currentBeijingTime(): { dateStr: string; minutes: number } {
   const beijing = new Date(Date.now() + 8 * 60 * 60 * 1000);
   return {
@@ -39,8 +37,11 @@ export async function runScheduledSyncChain() {
 export function startScheduler() {
   setInterval(() => {
     const { dateStr, minutes } = currentBeijingTime();
-    if (minutes >= TARGET_MINUTES && lastRunDate !== dateStr) {
-      lastRunDate = dateStr;
+    // "今天是否已经跑过"这个标记落在 store 里、随 store 一起落盘，不能用只存在内存里的变量——
+    // 否则每次重启后端都会清零，一旦重启时北京时间已过18:30，就会被误判成"今天还没跑过"，
+    // 60秒内又把当曲云/更新工单/TAPD这一整条链路重新触发一次
+    if (minutes >= TARGET_MINUTES && store.lastScheduledSyncDate !== dateStr) {
+      store.lastScheduledSyncDate = dateStr;
       runScheduledSyncChain().catch((e) => {
         console.error("定时同步任务执行异常:", e);
       });

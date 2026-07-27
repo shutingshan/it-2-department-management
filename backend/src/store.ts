@@ -15,6 +15,7 @@ interface PersistedState {
   messages: InSiteMessage[];
   logs: LogEntry[];
   lastUpdateTime: string;
+  lastScheduledSyncDate: string | null;
 }
 
 interface SyncJob {
@@ -41,6 +42,9 @@ class Store {
   logs: LogEntry[] = [];
   lastUpdateTime = "";
   currentJob: SyncJob | null = null;
+  // 每日定时同步"今天是否已经跑过"的标记，必须落盘——否则每次重启后端都会清零，
+  // 一旦重启时北京时间已过18:30，就会被误判成"今天还没跑过"而立刻重新触发一次
+  lastScheduledSyncDate: string | null = null;
 
   constructor() {
     this.load();
@@ -54,6 +58,7 @@ class Store {
       this.messages = parsed.messages ?? [];
       this.logs = parsed.logs ?? [];
       this.lastUpdateTime = parsed.lastUpdateTime ?? "";
+      this.lastScheduledSyncDate = parsed.lastScheduledSyncDate ?? null;
     } catch (e) {
       console.error(`[store] 读取持久化数据失败（${DATA_FILE}），本次将以空数据启动：`, (e as Error).message);
     }
@@ -68,6 +73,7 @@ class Store {
         messages: this.messages,
         logs: this.logs,
         lastUpdateTime: this.lastUpdateTime,
+        lastScheduledSyncDate: this.lastScheduledSyncDate,
       };
       const tmpFile = `${DATA_FILE}.tmp`;
       fs.writeFileSync(tmpFile, JSON.stringify(state));
