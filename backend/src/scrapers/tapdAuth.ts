@@ -72,6 +72,20 @@ async function looksLoggedOut(context: BrowserContext): Promise<boolean> {
   return qrCount > 0;
 }
 
+// 部分安全网关（如腾讯云WAF）会把无头浏览器的请求直接识别成"疑似攻击"并拦截，返回一个
+// 403 拦截页而不是真正的TAPD页面；这种情况跟"未登录"/"页面结构不对"是完全不同的问题
+// （前者是无头浏览器指纹被风控命中，后者才需要调整选择器），单独识别出来才能给出准确的报错
+export async function isWafBlocked(page: Page): Promise<boolean> {
+  try {
+    const title = await page.title();
+    if (/WAF|拦截/i.test(title)) return true;
+    const text = await page.evaluate(() => document.body?.innerText ?? "").catch(() => "");
+    return /您的请求已中断|Web应用防护服务|腾讯云WAF/.test(text);
+  } catch {
+    return false;
+  }
+}
+
 // 终端里等用户按回车：真实登录流程可能需要先点"登录"按钮才会出现二维码，
 // 步骤数、页面结构都是猜的，与其用选择器猜"是否已登录"（猜错就会在用户还没来得及操作时
 // 提前判定"已登录"并把浏览器关掉），不如让用户自己确认完成登录后再继续——更慢但绝对不会出错
@@ -85,6 +99,24 @@ function waitForEnter(promptText: string): Promise<void> {
   });
 }
 
+// 常见桌面 Chrome 的 UA/视口，尽量让无头浏览器看起来更像真实浏览器；
+// 同时在每个新页面patch掉 navigator.webdriver（无头 Chromium 默认会暴露这个字段，
+// 是最基础的自动化特征之一，容易被风控命中）
+const DESKTOP_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+
+async function newStealthContext(browser: Browser, storageState?: string): Promise<BrowserContext> {
+  const context = await browser.newContext({
+    ...(storageState ? { storageState } : {}),
+    userAgent: DESKTOP_USER_AGENT,
+    viewport: { width: 1440, height: 900 },
+  });
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+  });
+  return context;
+}
+
 // 无头同步（含每日定时任务）调用：只复用已保存的登录态，登录态无效则直接抛错，
 // 绝不在服务器上弹出无人可见的扫码窗口空等
 export async function getHeadlessAuthenticatedContext(browser: Browser): Promise<BrowserContext> {
@@ -94,9 +126,16 @@ export async function getHeadlessAuthenticatedContext(browser: Browser): Promise
       "TAPD 尚未登录：请在有屏幕的本机执行一次 `npm run tapd:login`，扫码登录后再重试同步。"
     );
   }
-  const context = await browser.newContext({ storageState: STATE_PATH });
+  const context = await newStealthContext(browser, STATE_PATH);
   const page = await context.newPage();
   await gotoAndSettle(page, config.tapd.baseUrl);
+
+  if (await isWafBlocked(page)) {
+    await dumpDebug(context, "waf-blocked");
+    throw new Error(
+      "访问TAPD被安全网关拦截（无头浏览器被识别为自动化工具，返回了WAF拦截页而非TAPD页面），需要调整反检测配置，请把 backend/.auth/debug/ 里最新的 waf-blocked 截图/HTML 发给开发者。"
+    );
+  }
 
   if (await looksLoggedOut(context)) {
     await dumpDebug(context, "headless-session-expired");
@@ -112,9 +151,15 @@ export async function getHeadlessAuthenticatedContext(browser: Browser): Promise
 // 不靠选择器猜"是否已登录"，避免猜错导致浏览器在用户还没操作完就被提前关掉
 export async function performInteractiveLogin(): Promise<void> {
   ensureDirs();
-  const browser = await chromium.launch({ headless: false, channel: config.tapd.browserChannel });
+  const browser = await chromium.launch({
+    headless: false,
+    channel: config.tapd.browserChannel,
+    args: ["--disable-blink-features=AutomationControlled"],
+  });
   try {
-    const context = await browser.newContext();
+    // 登录态保存下来后会被无头浏览器复用，这里也用同一套 UA/视口，减少"建立会话"和"复用会话"
+    // 两次请求指纹不一致的情况（这种不一致本身也是风控可能盯上的信号）
+    const context = await newStealthContext(browser);
     const page = await context.newPage();
     await gotoAndSettle(page, config.tapd.baseUrl);
     await dumpDebug(context, "before-manual-login");
@@ -131,5 +176,10 @@ export async function performInteractiveLogin(): Promise<void> {
 }
 
 export async function launchHeadlessBrowser(): Promise<Browser> {
-  return chromium.launch({ headless: true, channel: config.tapd.browserChannel });
+  return chromium.launch({
+    headless: true,
+    channel: config.tapd.browserChannel,
+    // 关掉 Chromium 用来标记"这是被自动化控制的浏览器"的特征位，降低被风控识别为爬虫的概率
+    args: ["--disable-blink-features=AutomationControlled"],
+  });
 }

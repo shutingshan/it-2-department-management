@@ -13,6 +13,7 @@ import fs from "fs";
 import path from "path";
 import { BrowserContext, Frame, Page } from "playwright";
 import { config } from "../config";
+import { isWafBlocked } from "./tapdAuth";
 
 const DEBUG_DIR = path.join(__dirname, "../../.auth/debug");
 
@@ -109,6 +110,14 @@ export async function scrapeTapdStoryFields(context: BrowserContext, tapdUrl: st
   try {
     await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
     await waitForContentToLoad(page);
+
+    // 安全网关（如腾讯云WAF）拦截返回的是一个跟TAPD毫不相关的403页面，抓不到字段是必然的；
+    // 单独识别出来才能给准确的错误原因，而不是被误判成"页面结构不对，需要调整选择器"
+    if (await isWafBlocked(page)) {
+      await dumpDebug(page, "waf-blocked");
+      throw new Error("访问TAPD需求详情页被安全网关拦截（无头浏览器被识别为自动化工具），需要调整反检测配置");
+    }
+
     const targets: Locatable[] = [page, ...page.frames()];
 
     async function findLabel(...labels: string[]): Promise<string | null> {
