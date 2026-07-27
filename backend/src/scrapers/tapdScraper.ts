@@ -144,17 +144,31 @@ async function clickToNavigate(page: Page, url: string) {
 // 实测发现：全新页面无论是 page.goto() 硬跳转还是模拟真实点击，只要没有从首页开始过，
 // 都会被应用自己重定向回需求列表页；只有像真实用户那样"先进首页、再一路点过去"，
 // 在同一个页面里连续导航，才能真正停留在具体的需求详情上
+// 从当曲云同步过来的"关联TAPD"地址，实测发现不止一种格式，比如：
+// https://www.tapd.cn/tapd_fe/<空间id>/story/detail/<id>
+// https://www.tapd.cn/<空间id>/prong/stories/view/<id>
+// 无法针对每种格式各写一套"列表页"推导规则；但不管哪种格式，网址里都带着空间 id
+// （第一段纯数字的路径片段），而"需求列表"这个页面固定是 tapd_fe/<空间id>/story/list，
+// 所以统一从空间 id 推导出这一个已验证能正常打开的列表页地址做热身，不用管目标详情地址本身是什么格式
+function deriveWorkspaceListUrl(tapdUrl: string): string | null {
+  const match = tapdUrl.match(/tapd\.cn\/(?:tapd_fe\/)?(\d+)\//);
+  if (!match) return null;
+  return `https://www.tapd.cn/tapd_fe/${match[1]}/story/list`;
+}
+
 export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promise<TapdStoryFields> {
   // 实测：直接跳到需求详情深链接会被应用自己重定向回该空间的"需求列表"页
-  // （用户在自己日常登录的浏览器里直接访问同一个地址是正常的），所以先到列表页，
-  // 再用真实点击（而非 page.goto）跳到具体详情地址，模拟真实"先进列表、再点进详情"的路径
-  const listUrl = tapdUrl.replace(/\/story\/detail\/.+$/, "/story/list");
-  if (listUrl !== tapdUrl) {
+  // （用户在自己日常登录的浏览器里直接访问同一个地址是正常的），所以先到列表页热身，
+  // 再用真实点击（而非 page.goto，会被同样的机制拦截/取消导航）跳到具体详情地址
+  const listUrl = deriveWorkspaceListUrl(tapdUrl);
+  if (listUrl) {
     await page.goto(listUrl, { waitUntil: "domcontentloaded", timeout: 240000 }).catch(() => {});
     await waitForContentToLoad(page);
     await clickToNavigate(page, tapdUrl);
   } else {
-    await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 240000 });
+    // 极少数情况下解析不出空间 id，退化成直接跳转；net::ERR_ABORTED 常见于目标页面自己
+    // 用客户端路由拦截、取消了这次导航（页面实际可能已经正确切换过去了），不能当成致命错误
+    await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 240000 }).catch(() => {});
   }
   await waitForContentToLoad(page);
 
