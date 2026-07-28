@@ -163,26 +163,90 @@ function deriveWorkspaceListUrl(tapdUrl: string): string | null {
   return `https://www.tapd.cn/tapd_fe/${match[1]}/story/list`;
 }
 
-// 在页面（含所有 iframe）里按标签抓一轮字段；一个都没抓到时返回 null
+// TAPD 详情页右侧字段面板是懒渲染的：靠下的字段（月度计划、完成工时等）不滚动到可视区域
+// 就不会出现在 DOM 里。抓取前先把页面上所有可滚动容器都滚到底，逼它把剩下的字段渲染出来
+async function scrollAllToBottom(page: Page) {
+  await page
+    .evaluate(() => {
+      const scrollables = Array.from(document.querySelectorAll<HTMLElement>("*")).filter((el) => {
+        const style = getComputedStyle(el);
+        return (
+          (style.overflowY === "auto" || style.overflowY === "scroll") &&
+          el.scrollHeight > el.clientHeight + 10
+        );
+      });
+      for (const el of scrollables) el.scrollTop = el.scrollHeight;
+      window.scrollTo(0, document.body.scrollHeight);
+    })
+    .catch(() => {});
+  await page.waitForTimeout(1200);
+}
+
+// 按 TAPD 详情页真实结构读取右侧字段面板：每个字段是一个 .entity-detail-right-col 块，
+// 里面 __key 是中文标签、__value 里的 span 上有 title 属性存着显示值（空值时为 "-"）。
+// 按中文标签取值而不是写死 field 名，是因为"测试人员/月度计划"这类是各空间自定义字段
+// （本空间是 custom_field_two / custom_field_seven），换个空间编号就不一样了
+async function readRightPanel(page: Page): Promise<Record<string, string>> {
+  return page
+    .evaluate(() => {
+      const map: Record<string, string> = {};
+      for (const col of Array.from(document.querySelectorAll(".entity-detail-right-col"))) {
+        const label = (col.querySelector(".entity-detail-right-col__key")?.textContent ?? "").trim();
+        if (!label) continue;
+        const valueEl = col.querySelector(".entity-detail-right-col__value");
+        if (!valueEl) continue;
+        // 优先取 span 的 title（显示值，迭代这类字段的 value 属性存的是内部id而非名称），
+        // 没有 title 就退回文本内容
+        const span = valueEl.querySelector("span[title]");
+        const raw = (span?.getAttribute("title") ?? valueEl.textContent ?? "").trim();
+        if (raw && raw !== "-") map[label] = raw;
+      }
+      return map;
+    })
+    .catch(() => ({}));
+}
+
+// 状态不在右侧字段面板里，而是详情页左上角那个下拉按钮（.status-label-button 里的 button，
+// 其 title 属性就是当前状态名，如"规划中"）
+async function readStatus(page: Page): Promise<string | null> {
+  return page
+    .evaluate(() => {
+      const btn = document.querySelector(".status-label-button button, .status-transfer-wrap button");
+      const title = btn?.getAttribute("title")?.trim();
+      if (title) return title;
+      const text = document.querySelector(".capsule__text")?.textContent?.trim();
+      return text || null;
+    })
+    .catch(() => null);
+}
+
+// 在页面（含所有 iframe）里抓一轮字段；一个都没抓到时返回 null
 async function extractFieldsOnce(page: Page): Promise<TapdStoryFields | null> {
+  await scrollAllToBottom(page);
+
+  const panel = await readRightPanel(page);
   const targets: Locatable[] = [page, ...page.frames()];
 
+  // 优先用上面按真实结构读到的值；读不到再退回早期那套"按标签找相邻节点"的通用兜底策略
   async function findLabel(...labels: string[]): Promise<string | null> {
+    for (const label of labels) {
+      if (panel[label]) return panel[label];
+    }
     for (const label of labels) {
       for (const target of targets) {
         const v = await getFieldValueByLabel(target, label);
-        if (v) return v;
+        if (v && v !== "-") return v;
       }
     }
     return null;
   }
 
-  const tapdStatus = await findLabel("状态");
+  const tapdStatus = (await readStatus(page)) ?? (await findLabel("状态"));
   const estimatedHours = parseHours(await findLabel("预估工时"));
   const actualHours = parseHours(await findLabel("完成工时", "消耗工时"));
   const developer = parseNameList(await findLabel("开发人员"));
   const tester = parseNameList(await findLabel("测试人员"));
-  const currentHandler = await findLabel("处理人", "当前处理人");
+  const currentHandler = parseNameList(await findLabel("处理人", "当前处理人"))[0] ?? null;
   const iterationName = await findLabel("迭代");
   const monthlyPlan = parseNameList(await findLabel("月度计划"));
 
@@ -217,11 +281,18 @@ async function extractFieldsOnce(page: Page): Promise<TapdStoryFields | null> {
 // 不影响主字段的同步结果（工单原有的子需求数据保持不动）
 async function extractSubStories(page: Page): Promise<TapdSubStoryFields[] | null> {
   try {
-    // 详情页里"子需求"通常是一个页签/锚点文字（可能带数量后缀，如"子需求 (3)"）
-    const tab = page.getByText(/^子需求/, { exact: false }).first();
+    // 详情页页签栏里"子需求"是 li#SubStories，后面 <label> 里带着数量，如 (0) / (3)
+    const tab = page.locator("li#SubStories");
     if ((await tab.count()) === 0) return null;
+
+    // 数量为 0 时不用点进去了，直接判定"确认没有子需求"（返回空数组而非 null，
+    // 这样上层会把工单的子需求清空，而不是保留过时数据）
+    const countText = (await tab.locator("label").first().textContent().catch(() => "")) ?? "";
+    if (/\(\s*0\s*\)/.test(countText)) return [];
+
     await tab.click({ timeout: 10000 });
     await page.waitForTimeout(5000);
+    await scrollAllToBottom(page);
 
     // 子需求列表一般渲染成表格：表头含"标题"，行内是各子需求的字段
     for (const target of [page, ...page.frames()] as Locatable[]) {

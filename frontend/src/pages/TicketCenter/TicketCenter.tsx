@@ -439,7 +439,9 @@ export default function TicketCenter() {
             }}
             trigger={["click"]}
           >
-            <Button icon={<ExportOutlined />}>导出</Button>
+            <Button size="small" icon={<ExportOutlined />}>
+              导出
+            </Button>
           </Dropdown>
         }
         rightExtra={
