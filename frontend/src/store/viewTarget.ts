@@ -1,16 +1,13 @@
 import { create } from "zustand";
 
-// "切换人员"功能：选择要查看谁的工单（不同于管理员的身份切换，不改变登录身份）
-// target 为 null 表示未手动选择，默认展示当前登录人自己的工单
-// target 为 "ALL" 表示查看二部全部工单
-export const ALL_TICKETS_TARGET = "ALL";
-
+// "切换人员"功能：选择要查看哪些 IT 受理人负责的工单（不同于管理员的身份切换，不改变登录身份）。
+// 支持多选；空数组表示不限人员，即"所有工单"。选中结果会直接作用到工单列表的筛选上
 interface ViewTargetState {
-  target: string | null;
-  setTarget: (t: string | null) => void;
+  targets: string[];
+  setTargets: (t: string[]) => void;
 }
 
 export const useViewTargetStore = create<ViewTargetState>((set) => ({
-  target: null,
-  setTarget: (t) => set({ target: t }),
+  targets: [],
+  setTargets: (t) => set({ targets: t }),
 }));

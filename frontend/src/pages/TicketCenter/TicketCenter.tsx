@@ -17,6 +17,7 @@ import { formatIterations, hoursDeviation, STAGE_COLORS } from "../../api/types"
 import type { Ticket } from "../../api/types";
 import { useAuthStore } from "../../store/auth";
 import { useFilteredTicketsStore } from "../../store/filteredTickets";
+import { useViewTargetStore } from "../../store/viewTarget";
 import { useTickets } from "./useTickets";
 import type { TicketFilters } from "./useTickets";
 import FilterBar from "./FilterBar";
@@ -242,6 +243,13 @@ export default function TicketCenter() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key]);
+
+  // 头部"切换人员"选中的人（可多选）直接作用到列表：按 IT 受理人筛选，空则不限人员
+  const { targets } = useViewTargetStore();
+  useEffect(() => {
+    setFilters((f) => ({ ...f, itHandler: targets.length ? targets : undefined }));
+    setPage(1);
+  }, [targets]);
 
   const { setFilters: publishFilters } = useFilteredTicketsStore();
   useEffect(() => {

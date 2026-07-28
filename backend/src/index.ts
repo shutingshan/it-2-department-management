@@ -19,6 +19,12 @@ import { runScheduledSyncChain, startScheduler } from "./scheduler";
 import { store } from "./store";
 
 const app = express();
+
+// Express 5 默认的 query parser 是 "simple"，不会把 `a[]=1&a[]=2` 解析成数组，
+// 而是原样留下 `a[]` 这个键——前端 axios 传数组时正是这种带方括号的格式，
+// 会导致所有多选筛选项（工单阶段/状态/发起人/IT受理人等）全部静默失效。
+// 换回 "extended"（qs）后，`a[]=1&a[]=2` 与 `a=1&a=2` 两种写法都能正确解析成数组
+app.set("query parser", "extended");
 const PORT = process.env.PORT ?? 4000;
 
 app.use(cors());
