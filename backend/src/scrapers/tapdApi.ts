@@ -31,8 +31,10 @@ export interface TapdStoryFields {
 // https://www.tapd.cn/<空间id>/prong/stories/view/<需求id>
 export function parseTapdRef(tapdUrl: string): { workspaceId: string; storyId: string } | null {
   const workspaceId = tapdUrl.match(/tapd\.cn\/(?:tapd_fe\/)?(\d+)\b/)?.[1];
-  // 需求id统一取地址里最后一段纯数字（两种格式下都是需求id）
-  const storyId = tapdUrl.match(/(\d+)(?:[/?#].*)?$/)?.[1];
+  // 需求id统一取路径末尾的纯数字段（两种地址格式下都是需求id）；
+  // 先剥掉查询串/hash和结尾斜杠再取，避免正则从更早的数字段（比如空间id）就匹配成功
+  const pathOnly = tapdUrl.split(/[?#]/)[0].replace(/\/+$/, "");
+  const storyId = pathOnly.match(/(\d+)$/)?.[1];
   if (!workspaceId || !storyId) return null;
   return { workspaceId, storyId };
 }

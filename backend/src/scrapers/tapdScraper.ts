@@ -13,7 +13,7 @@ import fs from "fs";
 import path from "path";
 import { Frame, Page } from "playwright";
 import { config } from "../config";
-import { isWafBlocked } from "./tapdAuth";
+import { getTapdAuthenticatedContext, isWafBlocked, launchTapdBrowser } from "./tapdAuth";
 
 const DEBUG_DIR = path.join(__dirname, "../../.auth/debug");
 
@@ -167,29 +167,8 @@ function deriveWorkspaceListUrl(tapdUrl: string): string | null {
   return `https://www.tapd.cn/tapd_fe/${match[1]}/story/list`;
 }
 
-export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promise<TapdStoryFields> {
-  // 实测：直接跳到需求详情深链接会被应用自己重定向回该空间的"需求列表"页
-  // （用户在自己日常登录的浏览器里直接访问同一个地址是正常的），所以先到列表页热身，
-  // 再用真实点击（而非 page.goto，会被同样的机制拦截/取消导航）跳到具体详情地址
-  const listUrl = deriveWorkspaceListUrl(tapdUrl);
-  if (listUrl) {
-    await page.goto(listUrl, { waitUntil: "domcontentloaded", timeout: 600000 }).catch(() => {});
-    await waitForContentToLoad(page);
-    await clickToNavigate(page, tapdUrl);
-  } else {
-    // 极少数情况下解析不出空间 id，退化成直接跳转；net::ERR_ABORTED 常见于目标页面自己
-    // 用客户端路由拦截、取消了这次导航（页面实际可能已经正确切换过去了），不能当成致命错误
-    await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 600000 }).catch(() => {});
-  }
-  await waitForContentToLoad(page);
-
-  // 安全网关（如腾讯云WAF）拦截返回的是一个跟TAPD毫不相关的403页面，抓不到字段是必然的；
-  // 单独识别出来才能给准确的错误原因，而不是被误判成"页面结构不对，需要调整选择器"
-  if (await isWafBlocked(page)) {
-    await dumpDebug(page, "waf-blocked");
-    throw new Error("访问TAPD需求详情页被安全网关拦截（浏览器被识别为自动化工具），需要调整反检测配置");
-  }
-
+// 在页面（含所有 iframe）里按标签抓一轮字段；一个都没抓到时返回 null
+async function extractFieldsOnce(page: Page): Promise<TapdStoryFields | null> {
   const targets: Locatable[] = [page, ...page.frames()];
 
   async function findLabel(...labels: string[]): Promise<string | null> {
@@ -208,13 +187,56 @@ export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promis
   const developer = parseNameList(await findLabel("开发人员"));
   const currentHandler = await findLabel("处理人", "当前处理人");
 
-  const gotAnything = tapdStatus || estimatedHours !== null || actualHours !== null || developer.length || currentHandler;
-  if (!gotAnything) {
-    await dumpDebug(page, "no-fields-matched");
-    throw new Error(
-      "未能识别到任何TAPD字段，页面结构可能与预期不符（选择器为通用猜测，需要根据真实页面调整）"
-    );
+  const gotAnything =
+    tapdStatus || estimatedHours !== null || actualHours !== null || developer.length || currentHandler;
+  if (!gotAnything) return null;
+  return { tapdStatus, estimatedHours, actualHours, developer, currentHandler };
+}
+
+export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promise<TapdStoryFields> {
+  // 实测：直接跳到需求详情深链接会被应用自己重定向回该空间的"需求列表"页
+  // （用户在自己日常登录的浏览器里直接访问同一个地址是正常的），所以先到列表页热身，
+  // 再用真实点击（而非 page.goto，会被同样的机制拦截/取消导航）跳到具体详情地址
+  const listUrl = deriveWorkspaceListUrl(tapdUrl);
+  if (listUrl) {
+    await page.goto(listUrl, { waitUntil: "domcontentloaded", timeout: 600000 }).catch(() => {});
+    await waitForContentToLoad(page);
+    await clickToNavigate(page, tapdUrl);
+  } else {
+    // 极少数情况下解析不出空间 id，退化成直接跳转；net::ERR_ABORTED 常见于目标页面自己
+    // 用客户端路由拦截、取消了这次导航（页面实际可能已经正确切换过去了），不能当成致命错误
+    await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 600000 }).catch(() => {});
   }
 
-  return { tapdStatus, estimatedHours, actualHours, developer, currentHandler };
+  // 之前的做法是"页面上出现任意文字就认为加载完成，然后只抓取一次"——但详情页的侧边栏/菜单等
+  // 骨架文字远早于详情内容出现（实测详情区域会白屏很久），一次性抓取几乎必然赶在内容渲染前，
+  // 空手而归后直接报错。这跟当曲云微前端首屏的问题同类，用同样的解法：反复尝试抓取，
+  // 抓到字段或超时（10分钟）才停，顺带在循环里检查是否撞上WAF拦截页
+  const deadline = Date.now() + 600000;
+  while (Date.now() < deadline) {
+    if (await isWafBlocked(page)) {
+      await dumpDebug(page, "waf-blocked");
+      throw new Error("访问TAPD需求详情页被安全网关拦截（浏览器被识别为自动化工具），需要调整反检测配置");
+    }
+    const fields = await extractFieldsOnce(page);
+    if (fields) return fields;
+    await page.waitForTimeout(3000);
+  }
+
+  await dumpDebug(page, "no-fields-matched");
+  throw new Error(
+    "等待10分钟仍未能识别到任何TAPD字段：页面内容一直没有渲染出来，或页面结构与预期不符（截图/HTML已存到 backend/.auth/debug/）"
+  );
+}
+
+// 自包含的浏览器抓取入口：每次调用自己起浏览器、复用已保存的登录态、抓完关闭。
+// 供 TAPD_FETCH_MODE=browser 模式下的单条/批量同步使用（批量下逐条起浏览器，会比较慢）
+export async function scrapeTapdStoryFieldsViaBrowser(tapdUrl: string): Promise<TapdStoryFields> {
+  const browser = await launchTapdBrowser();
+  try {
+    const { page } = await getTapdAuthenticatedContext(browser);
+    return await scrapeTapdStoryFields(page, tapdUrl);
+  } finally {
+    await browser.close().catch(() => {});
+  }
 }

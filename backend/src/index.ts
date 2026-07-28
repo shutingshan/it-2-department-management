@@ -14,6 +14,7 @@ import deptConfigRouter from "./routes/deptConfig";
 import logsRouter from "./routes/logs";
 import changeLogsRouter from "./routes/changeLogs";
 import exportRouter from "./routes/export";
+import webhooksRouter from "./routes/webhooks";
 import { runScheduledSyncChain, startScheduler } from "./scheduler";
 import { store } from "./store";
 
@@ -35,6 +36,8 @@ app.use("/api/dept-config", deptConfigRouter);
 app.use("/api/logs", logsRouter);
 app.use("/api/change-logs", changeLogsRouter);
 app.use("/api/export", exportRouter);
+// 供 TAPD 反向调用（需要配置 TAPD_WEBHOOK_TOKEN 才会启用）
+app.use("/api/webhooks", webhooksRouter);
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 

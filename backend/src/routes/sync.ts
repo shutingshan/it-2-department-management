@@ -7,8 +7,18 @@ import { SyncJob } from "../store";
 import { ScrapedRow, scrapeDangquyunTicketList } from "../scrapers/dangquyunScraper";
 import { mapScrapedRowToTicket } from "../scrapers/dangquyunMapper";
 import { fetchTapdStoryFields, TapdStoryFields } from "../scrapers/tapdApi";
+import { scrapeTapdStoryFieldsViaBrowser } from "../scrapers/tapdScraper";
+import { config } from "../config";
 import { applyFilters, parseQuery, TicketQuery } from "../filter";
 import { Ticket } from "../types";
+
+// TAPD 取数入口：按 .env 里 TAPD_FETCH_MODE 在 开放平台API / 浏览器页面爬取 两种方式间切换，
+// 两种方式返回同一套字段结构，后续的字段应用/阶段重算逻辑完全一致
+function fetchTapdFields(tapdUrl: string): Promise<TapdStoryFields> {
+  return config.tapd.fetchMode === "browser"
+    ? scrapeTapdStoryFieldsViaBrowser(tapdUrl)
+    : fetchTapdStoryFields(tapdUrl);
+}
 
 // 按工单中心当前筛选条件圈定候选工单；未传筛选条件时回退到"全部未完成/未关闭工单"；
 // 无论是否传筛选条件，均只对"未完成未关闭"的工单批量处理，不逐条处理已完成/已关闭的工单
@@ -328,7 +338,7 @@ export async function syncSingleTicketTapd(ticket: Ticket, actor: string): Promi
   ticketsSyncingTapd.add(ticket.id);
   const time = () => dayjs().format("YYYY-MM-DD HH:mm:ss");
   try {
-    const fields = await fetchTapdStoryFields(ticket.tapdUrl);
+    const fields = await fetchTapdFields(ticket.tapdUrl);
     applyTapdFields(ticket, fields);
     ticket.tapdErrorNote = null;
     store.addLog({
@@ -409,7 +419,7 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
       }
       ticketsSyncingTapd.add(ticket.id);
       try {
-        const fields = await fetchTapdStoryFields(ticket.tapdUrl!);
+        const fields = await fetchTapdFields(ticket.tapdUrl!);
         applyTapdFields(ticket, fields);
         ticket.tapdErrorNote = null; // 本次同步成功，清除历史异常标记
         job.success += 1;
