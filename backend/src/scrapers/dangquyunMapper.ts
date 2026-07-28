@@ -85,7 +85,7 @@ export function mapScrapedRowToTicket(row: ScrapedRow, existing?: Ticket): Ticke
     stage,
     status,
     devStatus,
-    urgent: existing?.urgent ?? false,
+    urgent: existing?.urgent ?? "",
     remark: existing?.remark ?? "",
     priority: emptyToNull(row["优先级"]),
     isReturned: existing?.isReturned ?? false,

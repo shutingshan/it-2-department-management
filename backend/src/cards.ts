@@ -52,7 +52,7 @@ export const CARD_DEFS: CardDef[] = [
     label: "紧急/急",
     description: "紧急字段有值的工单数",
     red: true,
-    match: (t) => notDoneNotClosed(t) && t.urgent === true,
+    match: (t) => notDoneNotClosed(t) && !!t.urgent.trim(),
   },
   {
     id: "unassigned",

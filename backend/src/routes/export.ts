@@ -38,7 +38,7 @@ function buildSheet(workbook: ExcelJS.Workbook, name: string, tickets: Ticket[])
       title: t.title,
       content: t.content,
       priority: t.priority ?? "-",
-      urgent: t.urgent ? "是" : "否",
+      urgent: t.urgent || "-",
       stage: t.stage,
       iterations: dedupe(t.iterations.map((i) => stripCurrentIterationTag(i.name))).join("、") || "-",
       monthlyPlan: t.monthlyPlan.join("、") || "-",

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Dropdown, Input, Pagination, Space, Spin, Switch, Table, Tag, Tooltip, Typography, message } from "antd";
+import { Button, Dropdown, Input, Pagination, Space, Spin, Table, Tag, Tooltip, Typography, message } from "antd";
 import { CopyOutlined, ExportOutlined } from "@ant-design/icons";
 import type { ColumnsType, ColumnType } from "antd/es/table";
 import {
@@ -72,24 +72,29 @@ function loadColumnOrder(): string[] {
   return DEFAULT_MIDDLE_ORDER;
 }
 
-function InlineUrgentSwitch({ ticket, onSaved }: { ticket: Ticket; onSaved: () => void }) {
+// 紧急是文本字段（可填"紧急"/"急"等），不是开关
+function InlineUrgentInput({ ticket, onSaved }: { ticket: Ticket; onSaved: () => void }) {
   const { user } = useAuthStore();
-  const [loading, setLoading] = useState(false);
+  const [value, setValue] = useState(ticket.urgent);
+  const [saving, setSaving] = useState(false);
 
-  async function toggle(checked: boolean) {
-    if (!user) return;
-    setLoading(true);
+  useEffect(() => setValue(ticket.urgent), [ticket.urgent]);
+
+  async function commit() {
+    if (!user || value === ticket.urgent) return;
+    setSaving(true);
     try {
       await api.patch(`/tickets/${ticket.id}`, {
-        fields: { urgent: checked },
+        fields: { urgent: value },
         actor: user.name,
         actorRole: user.role,
       });
       onSaved();
     } catch (e: any) {
       message.error(e?.response?.data?.message ?? "紧急字段保存失败");
+      setValue(ticket.urgent);
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   }
 
@@ -97,12 +102,14 @@ function InlineUrgentSwitch({ ticket, onSaved }: { ticket: Ticket; onSaved: () =
   const canEdit = !(user?.role === "it_handler" && ticket.itHandler !== user.name);
 
   return (
-    <Switch
+    <Input
       size="small"
-      checked={ticket.urgent}
-      loading={loading}
-      disabled={!canEdit}
-      onChange={toggle}
+      value={value}
+      disabled={saving || !canEdit}
+      placeholder="填写紧急"
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      onPressEnter={(e) => (e.target as HTMLInputElement).blur()}
     />
   );
 }
@@ -368,7 +375,7 @@ export default function TicketCenter() {
         title: "紧急",
         dataIndex: "urgent",
         width: 70,
-        render: (_: boolean, r: Ticket) => <InlineUrgentSwitch ticket={r} onSaved={reload} />,
+        render: (_: string, r: Ticket) => <InlineUrgentInput ticket={r} onSaved={reload} />,
       },
       priority: { title: "优先级", dataIndex: "priority", width: 80, render: (v: string | null) => v ?? "-" },
       monthlyPlan: {
@@ -491,7 +498,7 @@ export default function TicketCenter() {
               pagination={false}
               sticky
               scroll={{ x: 2600, y: tableScrollY }}
-              rowClassName={(r) => (r.urgent ? "row-urgent" : "")}
+              rowClassName={(r) => (r.urgent.trim() ? "row-urgent" : "")}
               components={{ header: { cell: DraggableHeaderCell } }}
               onChange={(_, __, sorter: any) => {
                 if (sorter?.field) {

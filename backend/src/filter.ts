@@ -78,7 +78,8 @@ export function applyFilters(tickets: Ticket[], q: TicketQuery): Ticket[] {
   if (q.submittedTo) result = result.filter((t) => t.submittedAt <= q.submittedTo!);
   if (q.stage?.length) result = result.filter((t) => q.stage!.includes(t.stage));
   if (q.status?.length) result = result.filter((t) => q.status!.includes(t.status));
-  if (q.urgent !== undefined) result = result.filter((t) => t.urgent === q.urgent);
+  // 紧急是文本字段，筛选按"有值/无值"判断，而不是等于某个具体文本
+  if (q.urgent !== undefined) result = result.filter((t) => !!t.urgent.trim() === q.urgent);
   if (q.monthlyPlan?.length)
     result = result.filter((t) => t.monthlyPlan.some((m) => q.monthlyPlan!.includes(m)));
   if (q.iteration?.length)

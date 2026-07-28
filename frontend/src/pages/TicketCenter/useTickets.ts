@@ -9,7 +9,7 @@ export interface TicketFilters {
   submittedTo?: string;
   stage?: string[];
   status?: string[];
-  urgent?: boolean;
+  urgent?: boolean; // 筛选口径：true=紧急字段有值，false=无值
   hasTapd?: boolean;
   monthlyPlan?: string[];
   iteration?: string[];

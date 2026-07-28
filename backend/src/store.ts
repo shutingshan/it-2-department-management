@@ -54,7 +54,12 @@ class Store {
     try {
       if (!fs.existsSync(DATA_FILE)) return;
       const parsed = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8")) as Partial<PersistedState>;
-      this.tickets = parsed.tickets ?? [];
+      // 历史数据兼容：紧急字段原来是布尔值，现已改为文本输入（空字符串=不紧急）。
+      // 旧的 store.json 里存的还是 true/false，不归一的话后续按文本处理会直接抛异常
+      this.tickets = (parsed.tickets ?? []).map((t) => ({
+        ...t,
+        urgent: typeof t.urgent === "string" ? t.urgent : t.urgent ? "紧急" : "",
+      }));
       this.messages = parsed.messages ?? [];
       this.logs = parsed.logs ?? [];
       this.lastUpdateTime = parsed.lastUpdateTime ?? "";
