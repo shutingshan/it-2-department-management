@@ -75,8 +75,9 @@ export default function FilterBar({
 
   return (
     <div className="filter-bar">
-      <Space wrap size={[8, 8]} className="filter-bar-controls">
+      <Space wrap size={[6, 6]} className="filter-bar-controls">
         <Input
+          size="small"
           allowClear
           style={{ width: 260 }}
           prefix={<SearchOutlined />}
@@ -85,6 +86,7 @@ export default function FilterBar({
           onChange={(e) => set("search", e.target.value || undefined)}
         />
         <Select
+          size="small"
           mode="multiple"
           allowClear
           placeholder="工单阶段"
@@ -95,6 +97,7 @@ export default function FilterBar({
           maxTagCount={1}
         />
         <Select
+          size="small"
           mode="multiple"
           allowClear
           placeholder="状态"
@@ -105,6 +108,7 @@ export default function FilterBar({
           maxTagCount={1}
         />
         <Select
+          size="small"
           mode="multiple"
           allowClear
           placeholder="月度计划"
@@ -115,6 +119,7 @@ export default function FilterBar({
           maxTagCount={1}
         />
         <Select
+          size="small"
           mode="multiple"
           allowClear
           placeholder="迭代"
@@ -125,6 +130,7 @@ export default function FilterBar({
           maxTagCount={1}
         />
         <Select
+          size="small"
           mode="multiple"
           allowClear
           placeholder="发起人"
@@ -136,6 +142,7 @@ export default function FilterBar({
           maxTagCount={1}
         />
         <Select
+          size="small"
           mode="multiple"
           allowClear
           placeholder="关注人"
@@ -147,6 +154,7 @@ export default function FilterBar({
           maxTagCount={1}
         />
         <Select
+          size="small"
           mode="multiple"
           allowClear
           placeholder="归属应用"
@@ -158,6 +166,7 @@ export default function FilterBar({
           maxTagCount={1}
         />
         <Select
+          size="small"
           mode="multiple"
           allowClear
           placeholder="紧急"
@@ -168,6 +177,7 @@ export default function FilterBar({
           maxTagCount={1}
         />
         <Select
+          size="small"
           mode="multiple"
           allowClear
           placeholder="是否有TAPD地址"
@@ -178,13 +188,16 @@ export default function FilterBar({
           maxTagCount={1}
         />
         <RangePicker
+          size="small"
           placeholder={["提交时间起", "提交时间止"]}
           onChange={(vals) => {
             set("submittedFrom", vals?.[0] ? vals[0].format("YYYY-MM-DD") : undefined);
             set("submittedTo", vals?.[1] ? vals[1].format("YYYY-MM-DD 23:59") : undefined);
           }}
         />
-        <Button onClick={clearAll}>清除筛选</Button>
+        <Button size="small" onClick={clearAll}>
+          清除筛选
+        </Button>
         {extra}
       </Space>
       {rightExtra && <div className="filter-bar-right">{rightExtra}</div>}

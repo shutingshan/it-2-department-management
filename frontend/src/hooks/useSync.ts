@@ -46,11 +46,13 @@ export function useSync(onRefresh?: () => void) {
     setBusy(true);
     setError(null);
     try {
-      // 真实抓取当曲云需要打开浏览器、登录、翻页拉全量数据，可能耗时几分钟，单独放宽超时
+      // 真实抓取当曲云需要打开浏览器、登录、逐页拉全量数据，单页最长可能等 4 分钟、
+      // 翻页可能有几十页，整体耗时可能远超 5 分钟；超时设置太短会导致客户端先放弃，
+      // 而后端仍在继续跑，用户重新点击又会撞上并发锁，所以这里放宽到 30 分钟
       const res = await api.post(
         "/sync/fetch-new",
         { actor: user.name, mode },
-        { timeout: 300000 }
+        { timeout: 1800000 }
       );
       setJob(res.data.job);
       onRefresh?.();

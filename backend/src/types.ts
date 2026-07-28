@@ -127,7 +127,7 @@ export interface Ticket {
   stage: TicketStage; // 工单阶段
   status: TicketStatus; // 状态
   devStatus: string | null; // TAPD 需求开发状态（用于阶段映射）
-  urgent: boolean; // 紧急（需求方等角色手动维护，跟优先级是两回事）
+  urgent: string; // 紧急（文本输入，如"紧急"/"急"；空字符串表示不紧急。需求方等角色手动维护，跟优先级是两回事）
   remark: string; // 备注（工单中心内维护，所有角色可实时编辑）
   priority: string | null; // 优先级（当曲云字段，如 High/Middle/Low）
   isReturned: boolean; // 是否退回

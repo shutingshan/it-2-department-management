@@ -120,7 +120,7 @@ export interface Ticket {
   stage: TicketStage;
   status: TicketStatus;
   devStatus: string | null;
-  urgent: boolean;
+  urgent: string; // 紧急：文本输入，空字符串表示不紧急
   remark: string;
   priority: string | null;
   isReturned: boolean;

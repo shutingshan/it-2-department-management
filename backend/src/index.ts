@@ -14,9 +14,17 @@ import deptConfigRouter from "./routes/deptConfig";
 import logsRouter from "./routes/logs";
 import changeLogsRouter from "./routes/changeLogs";
 import exportRouter from "./routes/export";
+import webhooksRouter from "./routes/webhooks";
 import { runScheduledSyncChain, startScheduler } from "./scheduler";
+import { store } from "./store";
 
 const app = express();
+
+// Express 5 默认的 query parser 是 "simple"，不会把 `a[]=1&a[]=2` 解析成数组，
+// 而是原样留下 `a[]` 这个键——前端 axios 传数组时正是这种带方括号的格式，
+// 会导致所有多选筛选项（工单阶段/状态/发起人/IT受理人等）全部静默失效。
+// 换回 "extended"（qs）后，`a[]=1&a[]=2` 与 `a=1&a=2` 两种写法都能正确解析成数组
+app.set("query parser", "extended");
 const PORT = process.env.PORT ?? 4000;
 
 app.use(cors());
@@ -34,6 +42,8 @@ app.use("/api/dept-config", deptConfigRouter);
 app.use("/api/logs", logsRouter);
 app.use("/api/change-logs", changeLogsRouter);
 app.use("/api/export", exportRouter);
+// 供 TAPD 反向调用（需要配置 TAPD_WEBHOOK_TOKEN 才会启用）
+app.use("/api/webhooks", webhooksRouter);
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
@@ -58,3 +68,14 @@ app.listen(PORT, () => {
 });
 
 startScheduler();
+
+// 工单/站内信/日志现在是真实数据，不能只留在内存里：定时落盘，
+// 并在进程正常退出（含 ts-node-dev 检测到文件变化触发的重启）前再落盘一次，尽量减少数据丢失窗口
+const autosaveTimer = setInterval(() => store.save(), 5000);
+function saveAndExit() {
+  clearInterval(autosaveTimer);
+  store.save();
+  process.exit(0);
+}
+process.on("SIGINT", saveAndExit);
+process.on("SIGTERM", saveAndExit);

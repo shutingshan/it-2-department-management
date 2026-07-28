@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { Frame, Page } from "playwright";
 import { getAuthenticatedContext, launchBrowser } from "./dangquyunAuth";
+import { config } from "../config";
 
 const DEBUG_DIR = path.join(__dirname, "../../.auth/debug");
 const MAX_PAGES = 60; // 安全上限，防止分页逻辑出问题时无限翻页
@@ -20,13 +21,20 @@ export interface ScrapeResult {
 
 type Locatable = Page | Frame;
 
+// 首屏冷启动超时（微前端首次加载几十个远程 chunk，观察到偏慢，放宽到 4 分钟）
+const FIRST_PAGE_TIMEOUT_MS = 240000;
+// 翻页超时：应用已经加载完成，翻页只是同一个已挂载模块内部重新请求/渲染数据，
+// 不需要再等首屏那么久；等太久反而会让"获取新工单"这个同步 HTTP 请求整体超时更容易被
+// 客户端提前放弃，与并发锁互相踩踏，所以单独给一个短得多的超时（但要给下面的滚动加载留够时间）
+const PAGINATION_TIMEOUT_MS = 60000;
+
 // 当曲云是微前端架构（主壳先渲染出来，工单列表本身由独立的远程模块异步加载挂载进来），
 // 首屏渲染出来时列表模块可能压根还没开始渲染，此时既没有文字也没有 antd 的加载中转圈（class
 // 带 spin-spinning），"没转圈=已加载完成"的判断会误判。所以不区分"等转圈消失"和"抓取"两步，
-// 而是直接反复尝试抓取，抓到数据或者彻底超时（4分钟）才停止
+// 而是直接反复尝试抓取，抓到数据或者彻底超时才停止
 async function waitForFirstPageData(
   targets: Locatable[],
-  timeoutMs = 240000
+  timeoutMs: number
 ): Promise<{ rows: ScrapedRow[]; strategy: ExtractStrategy } | null> {
   const deadline = Date.now() + timeoutMs;
   let lastAttempt: { rows: ScrapedRow[]; strategy: ExtractStrategy } | null = null;
@@ -38,13 +46,58 @@ async function waitForFirstPageData(
   return lastAttempt;
 }
 
+// 当曲云表格是虚拟滚动列表：一页最多 200 条，但同一时刻 DOM 里只渲染视口内的那一小部分行，
+// 必须不断把表格滚动到底部触发懒加载，直到渲染出的行数不再增长（连续几次都一样）才算真正
+// 拿到本页全部数据，否则只会抓到滚动条顶部那几十条
+async function scrollGridToLoadAll(
+  target: Locatable,
+  rowSelector: string,
+  timeoutMs = 20000
+): Promise<number> {
+  const rowLocator = target.locator(rowSelector);
+  const deadline = Date.now() + timeoutMs;
+  let lastCount = await rowLocator.count();
+  let stableRounds = 0;
+  while (Date.now() < deadline && stableRounds < 3) {
+    await target
+      .evaluate((selector) => {
+        const row = document.querySelector(selector);
+        if (!row) return;
+        let el: HTMLElement | null = row as HTMLElement;
+        while (el && el !== document.body) {
+          const style = getComputedStyle(el);
+          if ((style.overflowY === "auto" || style.overflowY === "scroll") && el.scrollHeight > el.clientHeight + 10) {
+            el.scrollTop = el.scrollHeight;
+            return;
+          }
+          el = el.parentElement;
+        }
+        window.scrollTo(0, document.body.scrollHeight);
+      }, rowSelector)
+      .catch(() => {});
+    await new Promise((r) => setTimeout(r, 500));
+    const count = await rowLocator.count();
+    if (count === lastCount) {
+      stableRounds += 1;
+    } else {
+      stableRounds = 0;
+      lastCount = count;
+    }
+  }
+  return lastCount;
+}
+
 // 当曲云（lumi 自研表格组件）的实际结构：既不是原生 table，也没有标准 ARIA role，
 // 而是每一行用 data-row-item="true" 标记、每个单元格用 data-columnitem 标记；
 // class 名带编译哈希（如 columnItemHeaderTitle___3CMa-）会变，属性选择器更稳定
 async function extractFromDangquyunGrid(target: Locatable): Promise<ScrapedRow[] | null> {
-  const rowLocator = target.locator('[data-row-item="true"]');
-  const rowCount = await rowLocator.count();
+  const rowSelector = '[data-row-item="true"]';
+  const rowLocator = target.locator(rowSelector);
+  let rowCount = await rowLocator.count();
   if (rowCount === 0) return null;
+
+  // 已经渲染出至少一行，说明表格已经挂载好了，接下来滚动到底部把本页剩余的行也加载出来
+  rowCount = await scrollGridToLoadAll(target, rowSelector);
 
   const headers = await target.locator('[class*="columnItemHeaderTitle"] [class*="titleSpanTitle"]').allTextContents();
 
@@ -154,17 +207,39 @@ function dedupeByCode(allRows: ScrapedRow[]): ScrapedRow[] {
   return Array.from(map.values());
 }
 
+// 去掉查询字符串和结尾斜杠再比较，容忍页面自己在 URL 后面附加的无关参数/尾部斜杠差异，
+// 但仍能识别出"跑到了完全不同的地址"（比如登录跳转异常、网站改版换了路径）
+function normalizeUrl(url: string): string {
+  return url.split("?")[0].replace(/\/+$/, "");
+}
+
 export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
   const browser = await launchBrowser();
   try {
     const context = await getAuthenticatedContext(browser);
     const page = context.pages()[0] ?? (await context.newPage());
 
+    // 登录/跳转流程走完后，最终停留的地址必须是 .env 里配置的 DANGQUYUN_TARGET_URL——
+    // 如果因为登录跳转异常、网站改版换了地址等原因跑到了别的网址，后面抓到的数据大概率
+    // 是错的（或者压根不是工单列表），这里直接判定本次抓取无效，不继续处理任何数据
+    const expectedUrl = normalizeUrl(config.dangquyun.targetUrl);
+    const actualUrl = normalizeUrl(page.url());
+    if (actualUrl !== expectedUrl) {
+      fs.mkdirSync(DEBUG_DIR, { recursive: true });
+      const stamp = Date.now();
+      await page.screenshot({ path: path.join(DEBUG_DIR, `${stamp}-wrong-target-url.png`), fullPage: true }).catch(() => {});
+      fs.writeFileSync(path.join(DEBUG_DIR, `${stamp}-wrong-target-url.html`), await page.content().catch(() => ""));
+      throw new Error(
+        `抓取时页面最终停留的地址与配置不符（期望：${expectedUrl}，实际：${actualUrl}），` +
+          `可能是登录跳转异常或网站改版，本次抓取判定无效`
+      );
+    }
+
     // 很多低代码平台把实际业务内容渲染在 iframe 里，主页面本身可能只是个空壳，
     // 所以要连同页面里所有 iframe 一起找，而不只是主页面
     const targets: Locatable[] = [page, ...page.frames()];
 
-    const firstPage = await waitForFirstPageData(targets);
+    const firstPage = await waitForFirstPageData(targets, FIRST_PAGE_TIMEOUT_MS);
     if (!firstPage) {
       // 三种常见结构在主页面和所有 iframe 里都没找到：保存现场，方便针对实际页面结构调整选择器
       fs.mkdirSync(DEBUG_DIR, { recursive: true });
@@ -196,7 +271,7 @@ export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
       const moved = await goToNextPage(targets);
       if (!moved) break;
 
-      const next = await waitForFirstPageData(targets);
+      const next = await waitForFirstPageData(targets, PAGINATION_TIMEOUT_MS);
       if (!next || next.rows.length === 0) break; // 翻页后抓不到数据了，停止，避免死循环
       allRows.push(...next.rows);
       pageCount += 1;

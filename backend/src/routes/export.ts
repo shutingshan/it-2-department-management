@@ -38,7 +38,7 @@ function buildSheet(workbook: ExcelJS.Workbook, name: string, tickets: Ticket[])
       title: t.title,
       content: t.content,
       priority: t.priority ?? "-",
-      urgent: t.urgent ? "是" : "否",
+      urgent: t.urgent || "-",
       stage: t.stage,
       iterations: dedupe(t.iterations.map((i) => stripCurrentIterationTag(i.name))).join("、") || "-",
       monthlyPlan: t.monthlyPlan.join("、") || "-",
@@ -52,9 +52,13 @@ function buildSheet(workbook: ExcelJS.Workbook, name: string, tickets: Ticket[])
   });
 }
 
-// 按发起人维度导出：每个发起人一个文件，命名 IT二部工单数据-{发起人}
+// 分组维度导出：requester=按发起人（默认，兼容旧调用），itHandler=按IT受理人；
+// 每个人一个文件，命名 IT二部工单数据-{人名}
 router.post("/", async (req, res) => {
-  const q = parseQuery(req.body as Record<string, unknown>);
+  const { groupBy, ...filters } = req.body as Record<string, unknown>;
+  const groupField: "requester" | "itHandler" = groupBy === "itHandler" ? "itHandler" : "requester";
+
+  const q = parseQuery(filters);
   const filtered = applyFilters(store.tickets, q);
 
   if (filtered.length === 0) {
@@ -63,8 +67,9 @@ router.post("/", async (req, res) => {
 
   const groups = new Map<string, Ticket[]>();
   filtered.forEach((t) => {
-    if (!groups.has(t.requester)) groups.set(t.requester, []);
-    groups.get(t.requester)!.push(t);
+    const key = t[groupField] || "未分配";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(t);
   });
 
   const zipName = `IT二部工单数据_${dayjs().format("YYYYMMDD_HHmm")}.zip`;
@@ -77,8 +82,8 @@ router.post("/", async (req, res) => {
   });
   archive.pipe(res);
 
-  for (const [requester, tickets] of groups) {
-    const fileName = `IT二部工单数据-${requester}`;
+  for (const [person, tickets] of groups) {
+    const fileName = `IT二部工单数据-${person}`;
     const workbook = new ExcelJS.Workbook();
     buildSheet(workbook, fileName, tickets);
     const buffer = await workbook.xlsx.writeBuffer();

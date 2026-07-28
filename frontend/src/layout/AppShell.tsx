@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Avatar, Breadcrumb, Button, Layout, Menu, Modal, Space, Typography } from "antd";
+import { Avatar, Breadcrumb, Button, Checkbox, Layout, Menu, Modal, Space, Typography } from "antd";
 import {
   ApartmentOutlined,
   AppstoreOutlined,
@@ -14,7 +14,7 @@ import {
   UserOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../store/auth";
-import { useViewTargetStore, ALL_TICKETS_TARGET } from "../store/viewTarget";
+import { useViewTargetStore } from "../store/viewTarget";
 import UpdateTicketsButton from "../components/UpdateTicketsButton";
 import MessageBell from "../components/MessageBell";
 import { ROLE_LABELS } from "../api/types";
@@ -35,7 +35,8 @@ export default function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const [refreshTick, setRefreshTick] = useState(0);
-  const [collapsed, setCollapsed] = useState(false);
+  // 侧边栏默认收起，把横向空间尽量留给工单列表（列很多，需要横向滚动）
+  const [collapsed, setCollapsed] = useState(true);
 
   if (!user) {
     return <Navigate to="/login" replace />;
@@ -120,20 +121,18 @@ export default function AppShell() {
 
 function MyTicketsButton() {
   const { user } = useAuthStore();
-  const { target } = useViewTargetStore();
+  const { setTargets } = useViewTargetStore();
   const navigate = useNavigate();
   if (!user) return null;
 
-  const effectiveTarget = target === ALL_TICKETS_TARGET ? undefined : target ?? user.name;
-
+  // 快捷入口：把人员筛选直接设成自己，再跳到工单中心
   return (
     <Button
       icon={<UserOutlined />}
-      onClick={() =>
-        navigate("/tickets", {
-          state: { itHandler: effectiveTarget ? [effectiveTarget] : undefined },
-        })
-      }
+      onClick={() => {
+        setTargets([user.name]);
+        navigate("/tickets");
+      }}
     >
       我负责的工单
     </Button>
@@ -141,50 +140,63 @@ function MyTicketsButton() {
 }
 
 function SwitchTargetButton() {
-  const { user } = useAuthStore();
-  const { target, setTarget } = useViewTargetStore();
+  const { targets, setTargets } = useViewTargetStore();
   const [open, setOpen] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
+  // 弹窗里先勾选、点确定才生效，避免每勾一个就刷一次列表
+  const [draft, setDraft] = useState<string[]>([]);
 
+  // 取真实工单数据里出现过的 IT 受理人（后端已去重排序），而不是预置的部门人员目录——
+  // 目录里有的人可能一条工单都没有，工单里的受理人也可能不在目录里
   async function loadUsers() {
-    const res = await api.get("/auth/users", { params: { role: "it_handler" } });
+    const res = await api.get("/tickets/it-handlers");
     setUsers(res.data.data);
   }
 
+  function toggle(name: string) {
+    setDraft((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
+  }
+
   const currentLabel =
-    target === ALL_TICKETS_TARGET ? "所有工单" : target ?? user?.name ?? "";
+    targets.length === 0 ? "所有工单" : targets.length === 1 ? targets[0] : `${targets[0]} 等${targets.length}人`;
 
   return (
     <>
-      <Button icon={<SwapOutlined />} onClick={() => setOpen(true)}>
+      <Button
+        icon={<SwapOutlined />}
+        onClick={() => {
+          setDraft(targets);
+          setOpen(true);
+        }}
+      >
         切换人员（{currentLabel}）
       </Button>
       <Modal
-        title="切换查看对象"
+        title="切换查看对象（可多选）"
         open={open}
         onCancel={() => setOpen(false)}
         afterOpenChange={(visible) => visible && loadUsers()}
-        footer={null}
+        okText="确定"
+        cancelText="取消"
+        onOk={() => {
+          setTargets(draft);
+          setOpen(false);
+        }}
       >
         <div className="switch-user-list">
           <div
-            className={"switch-user-item" + (target === ALL_TICKETS_TARGET ? " active" : "")}
-            onClick={() => {
-              setTarget(ALL_TICKETS_TARGET);
-              setOpen(false);
-            }}
+            className={"switch-user-item" + (draft.length === 0 ? " active" : "")}
+            onClick={() => setDraft([])}
           >
-            <span>所有工单</span>
+            <span>所有工单（不限人员）</span>
           </div>
           {users.map((u) => (
             <div
               key={u.id}
-              className={"switch-user-item" + (target === u.name ? " active" : "")}
-              onClick={() => {
-                setTarget(u.name);
-                setOpen(false);
-              }}
+              className={"switch-user-item" + (draft.includes(u.name) ? " active" : "")}
+              onClick={() => toggle(u.name)}
             >
+              <Checkbox checked={draft.includes(u.name)} onClick={(e) => e.preventDefault()} />
               <Avatar size="small" style={{ backgroundColor: u.avatarColor }}>
                 {u.name.slice(-1)}
               </Avatar>

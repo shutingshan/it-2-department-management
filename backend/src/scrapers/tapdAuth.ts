@@ -2,17 +2,24 @@
  * TAPD（tapd.cn）登录态管理。
  *
  * 与当曲云不同，TAPD 用扫码登录，没有账号密码，因此不能像 dangquyunAuth 那样在无头模式下
- * 自动完成登录：扫码这一步必须有一块真实屏幕、由人拿手机扫。这里的设计是：
- * - 正常同步（含每日定时任务）永远以无头模式复用已保存的登录态（backend/.auth/tapd-state.json），
- *   登录态有效就直接用，没有/过期了就直接抛错，不会在服务器上弹出看不见的浏览器窗口空等。
- * - 真正的扫码登录只能通过 `npm run tapd:login`（backend/src/scripts/tapdLogin.ts）在有屏幕的
- *   本机以非无头模式手动跑一次，扫码后登录态会保存下来，之后无头同步/定时任务才能复用。
+ * 自动完成登录：扫码这一步必须有一块真实屏幕、由人拿手机扫。
+ *
+ * 实测下来，无头（headless）模式访问 tapd.cn 会被腾讯云WAF识别成自动化工具直接拦截/卡死
+ * （返回403拦截页，或者请求直接挂起没有响应），加了UA伪装、去自动化特征位等常规反检测手段
+ * 之后仍然如此。所以正常同步（含单条点击同步、批量获取TAPD信息、每日定时任务）也都统一改成
+ * 非无头模式：会自动弹出一个真实可见的浏览器窗口、全自动完成导航/抓取/关闭，不需要人工操作，
+ * 但运行期间窗口会短暂出现在屏幕上（批量任务耗时较长时窗口会一直开着，单条同步很快就会自动关闭）。
+ * 这也意味着 TAPD 同步只能在有真实图形界面的机器上运行（跟 `npm run tapd:login` 一样）。
+ *
+ * 扫码登录本身仍只能通过 `npm run tapd:login`（backend/src/scripts/tapdLogin.ts）手动跑一次，
+ * 扫码后登录态保存下来，之后的自动同步才能直接复用、不需要再次扫码。
  *
  * 选择器为通用策略实现，未经真实 tapd.cn 页面验证；如与实际页面结构不符，
  * 把 backend/.auth/debug/ 下的截图/HTML 发回来，再针对性调整。
  */
 import fs from "fs";
 import path from "path";
+import readline from "readline";
 import { Browser, BrowserContext, Page, chromium } from "playwright";
 import { config } from "../config";
 
@@ -26,8 +33,8 @@ function ensureDirs() {
 }
 
 async function gotoAndSettle(page: Page, url: string) {
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-  const deadline = Date.now() + 60000;
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 600000 });
+  const deadline = Date.now() + 600000;
   while (Date.now() < deadline) {
     try {
       const text = await page.evaluate(() => document.body?.innerText?.trim().length ?? 0);
@@ -58,72 +65,124 @@ async function dumpDebug(context: BrowserContext, label: string) {
 }
 
 // 粗略判断当前是否处于"未登录"状态：URL 带 login/passport/sso 关键字，
-// 或页面上出现明显的二维码元素（TAPD 统一登录页通常会展示扫码登录的二维码图片）
+// 或页面上出现明显带"qrcode"字样的二维码元素（TAPD 统一登录页通常会展示扫码登录的二维码图片）。
+// 注意：不能拿裸的 canvas 标签当信号——实测已登录的正常工作台页面上也会有跟登录完全无关的
+// canvas 元素（图表、头像之类），拿它判断"是否已登录"会把已登录状态误判成"还没登录/登录过期"
 async function looksLoggedOut(context: BrowserContext): Promise<boolean> {
   const page = context.pages()[0];
   if (!page) return true;
   const url = page.url();
   if (/passport|login|sso/i.test(url)) return true;
   const qrCount = await page
-    .locator('img[src*="qrcode" i], canvas, [class*="qrcode" i], [class*="qr-code" i]')
+    .locator('img[src*="qrcode" i], [class*="qrcode" i], [class*="qr-code" i]')
     .count()
     .catch(() => 0);
   return qrCount > 0;
 }
 
-// 等待用户用手机扫码完成登录（仅供 tapdLogin.ts 交互式登录脚本调用，非无头模式下才有意义）
-async function waitForQrLogin(context: BrowserContext, page: Page, timeoutMs = 120000) {
-  console.log("[tapd] 检测到尚未登录，请在弹出的浏览器窗口中使用手机 TAPD/企业微信扫码登录……");
-  await dumpDebug(context, "qrcode-waiting");
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!(await looksLoggedOut(context))) {
-      console.log("[tapd] 已检测到登录成功");
-      return;
-    }
-    await page.waitForTimeout(1000);
+// 部分安全网关（如腾讯云WAF）会把自动化浏览器的请求直接识别成"疑似攻击"并拦截，返回一个
+// 403 拦截页而不是真正的TAPD页面；这种情况跟"未登录"/"页面结构不对"是完全不同的问题
+// （前者是自动化指纹被风控命中，后者才需要调整选择器），单独识别出来才能给出准确的报错
+export async function isWafBlocked(page: Page): Promise<boolean> {
+  try {
+    const title = await page.title();
+    if (/WAF|拦截/i.test(title)) return true;
+    const text = await page.evaluate(() => document.body?.innerText ?? "").catch(() => "");
+    return /您的请求已中断|Web应用防护服务|腾讯云WAF/.test(text);
+  } catch {
+    return false;
   }
-  await dumpDebug(context, "qrcode-timeout");
-  throw new Error(`等待扫码登录超时（${Math.round(timeoutMs / 1000)}秒），请重新运行 npm run tapd:login 并尽快扫码`);
 }
 
-// 无头同步（含每日定时任务）调用：只复用已保存的登录态，登录态无效则直接抛错，
-// 绝不在服务器上弹出无人可见的扫码窗口空等
-export async function getHeadlessAuthenticatedContext(browser: Browser): Promise<BrowserContext> {
+// 终端里等用户按回车：真实登录流程可能需要先点"登录"按钮才会出现二维码，
+// 步骤数、页面结构都是猜的，与其用选择器猜"是否已登录"（猜错就会在用户还没来得及操作时
+// 提前判定"已登录"并把浏览器关掉），不如让用户自己确认完成登录后再继续——更慢但绝对不会出错
+function waitForEnter(promptText: string): Promise<void> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(promptText, () => {
+      rl.close();
+      resolve();
+    });
+  });
+}
+
+// 常见桌面 Chrome 的 UA/视口，加上给每个新页面patch掉 navigator.webdriver
+// （Playwright 默认会暴露这个字段，是最基础的自动化特征之一，容易被风控命中），
+// 作为多一层防护——即便已经改成非无头模式，这些依然是无害的额外保险
+const DESKTOP_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+
+async function newStealthContext(browser: Browser, storageState?: string): Promise<BrowserContext> {
+  const context = await browser.newContext({
+    ...(storageState ? { storageState } : {}),
+    userAgent: DESKTOP_USER_AGENT,
+    viewport: { width: 1440, height: 900 },
+  });
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+  });
+  return context;
+}
+
+// 自动同步（单条点击同步、批量获取TAPD信息、每日定时任务）调用：只复用已保存的登录态，
+// 登录态无效则直接抛错。非无头模式运行，会自动弹出一个可见的浏览器窗口完成后续操作，
+// 全程无需人工干预，但需要机器上有真实图形界面（同 `npm run tapd:login` 的前提）。
+//
+// 返回的 page 就是这里用来验证登录态、已经从首页/工作台热启动过的那个页面，调用方要
+// 一直复用它去访问具体需求详情（而不是另开一个全新页面）——实测发现：全新页面不管是
+// page.goto() 硬跳转还是模拟真实点击，只要没有从首页开始过、上来就直接访问需求详情/
+// 列表深链接，都会被应用自己重定向回需求列表页；只有像真实用户那样"先进首页、再一路
+// 点过去"，同一个页面里连续导航，才能真正停留在具体的需求详情上
+export async function getTapdAuthenticatedContext(browser: Browser): Promise<{ context: BrowserContext; page: Page }> {
   ensureDirs();
   if (!fs.existsSync(STATE_PATH)) {
     throw new Error(
       "TAPD 尚未登录：请在有屏幕的本机执行一次 `npm run tapd:login`，扫码登录后再重试同步。"
     );
   }
-  const context = await browser.newContext({ storageState: STATE_PATH });
+  const context = await newStealthContext(browser, STATE_PATH);
   const page = await context.newPage();
   await gotoAndSettle(page, config.tapd.baseUrl);
 
+  if (await isWafBlocked(page)) {
+    await dumpDebug(context, "waf-blocked");
+    throw new Error(
+      "访问TAPD被安全网关拦截，需要调整反检测配置，请把 backend/.auth/debug/ 里最新的 waf-blocked 截图/HTML 发给开发者。"
+    );
+  }
+
   if (await looksLoggedOut(context)) {
-    await dumpDebug(context, "headless-session-expired");
+    await dumpDebug(context, "session-expired");
     throw new Error(
       "TAPD 登录态已过期：请在有屏幕的本机重新执行一次 `npm run tapd:login` 扫码登录后再重试同步。"
     );
   }
-  return context;
+  return { context, page };
 }
 
-// 交互式登录（仅供 tapdLogin.ts 调用）：非无头模式打开浏览器，等待人工扫码，成功后保存登录态
+// 交互式登录（仅供 tapdLogin.ts 调用）：非无头模式打开浏览器，人工完成登录（可能需要先点"登录"
+// 按钮才会出现二维码，再扫码），由用户自己在终端按回车确认登录完成后才保存登录态并关闭浏览器——
+// 不靠选择器猜"是否已登录"，避免猜错导致浏览器在用户还没操作完就被提前关掉
 export async function performInteractiveLogin(): Promise<void> {
   ensureDirs();
-  const browser = await chromium.launch({ headless: false, channel: config.tapd.browserChannel });
+  const browser = await chromium.launch({
+    headless: false,
+    channel: config.tapd.browserChannel,
+    args: ["--disable-blink-features=AutomationControlled"],
+  });
   try {
-    const context = await browser.newContext();
+    // 登录态保存下来后会被自动同步的浏览器复用，这里也用同一套 UA/视口，减少"建立会话"和"复用会话"
+    // 两次请求指纹不一致的情况（这种不一致本身也是风控可能盯上的信号）
+    const context = await newStealthContext(browser);
     const page = await context.newPage();
     await gotoAndSettle(page, config.tapd.baseUrl);
+    await dumpDebug(context, "before-manual-login");
 
-    if (await looksLoggedOut(context)) {
-      await waitForQrLogin(context, page);
-    } else {
-      console.log("[tapd] 当前浏览器已是登录状态");
-    }
+    console.log("[tapd] 浏览器窗口已打开，请在该窗口里手动完成登录（可能需要先点击登录按钮，再扫码）。");
+    await waitForEnter("[tapd] 完成登录后回到这里，按回车键继续保存登录态：");
 
+    await dumpDebug(context, "after-manual-login");
     await context.storageState({ path: STATE_PATH });
     console.log(`[tapd] 登录态已保存到 ${STATE_PATH}`);
   } finally {
@@ -131,6 +190,13 @@ export async function performInteractiveLogin(): Promise<void> {
   }
 }
 
-export async function launchHeadlessBrowser(): Promise<Browser> {
-  return chromium.launch({ headless: true, channel: config.tapd.browserChannel });
+// 自动同步用的浏览器：非无头模式（会弹出真实可见窗口），因为无头模式访问 tapd.cn 会被
+// 安全网关拦截/卡死。全程自动操作，不需要人工干预，只是运行期间窗口会短暂出现在屏幕上
+export async function launchTapdBrowser(): Promise<Browser> {
+  return chromium.launch({
+    headless: false,
+    channel: config.tapd.browserChannel,
+    // 关掉 Chromium 用来标记"这是被自动化控制的浏览器"的特征位，降低被风控识别为爬虫的概率
+    args: ["--disable-blink-features=AutomationControlled"],
+  });
 }

@@ -90,11 +90,12 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
     </div>
   );
 
+  const jobRunning = busy || job?.status === "running";
   const items: MenuProps["items"] = [
-    { key: "fetch-incremental", label: "获取新工单" },
-    { key: "fetch-full", label: "全量获取（用于数据初始化）" },
-    { key: "update", label: "更新工单（按当前筛选）" },
-    { key: "tapd", label: "获取TAPD信息（按当前筛选）" },
+    { key: "fetch-incremental", label: "获取新工单", disabled: jobRunning },
+    { key: "fetch-full", label: "全量获取（用于数据初始化）", disabled: jobRunning },
+    { key: "update", label: "更新工单（按当前筛选）", disabled: jobRunning },
+    { key: "tapd", label: "获取TAPD信息（按当前筛选）", disabled: jobRunning },
     { key: "abnormal", label: "获取异常数据（需求待确认）", disabled: true },
   ];
 

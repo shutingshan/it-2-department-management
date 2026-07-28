@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Button, Input, Pagination, Space, Switch, Table, Tag, Tooltip, Typography, message } from "antd";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Button, Dropdown, Input, Pagination, Space, Spin, Table, Tag, Tooltip, Typography, message } from "antd";
 import { CopyOutlined, ExportOutlined } from "@ant-design/icons";
 import type { ColumnsType, ColumnType } from "antd/es/table";
 import {
@@ -17,6 +17,7 @@ import { formatIterations, hoursDeviation, STAGE_COLORS } from "../../api/types"
 import type { Ticket } from "../../api/types";
 import { useAuthStore } from "../../store/auth";
 import { useFilteredTicketsStore } from "../../store/filteredTickets";
+import { useViewTargetStore } from "../../store/viewTarget";
 import { useTickets } from "./useTickets";
 import type { TicketFilters } from "./useTickets";
 import FilterBar from "./FilterBar";
@@ -71,24 +72,29 @@ function loadColumnOrder(): string[] {
   return DEFAULT_MIDDLE_ORDER;
 }
 
-function InlineUrgentSwitch({ ticket, onSaved }: { ticket: Ticket; onSaved: () => void }) {
+// 紧急是文本字段（可填"紧急"/"急"等），不是开关
+function InlineUrgentInput({ ticket, onSaved }: { ticket: Ticket; onSaved: () => void }) {
   const { user } = useAuthStore();
-  const [loading, setLoading] = useState(false);
+  const [value, setValue] = useState(ticket.urgent);
+  const [saving, setSaving] = useState(false);
 
-  async function toggle(checked: boolean) {
-    if (!user) return;
-    setLoading(true);
+  useEffect(() => setValue(ticket.urgent), [ticket.urgent]);
+
+  async function commit() {
+    if (!user || value === ticket.urgent) return;
+    setSaving(true);
     try {
       await api.patch(`/tickets/${ticket.id}`, {
-        fields: { urgent: checked },
+        fields: { urgent: value },
         actor: user.name,
         actorRole: user.role,
       });
       onSaved();
     } catch (e: any) {
       message.error(e?.response?.data?.message ?? "紧急字段保存失败");
+      setValue(ticket.urgent);
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   }
 
@@ -96,12 +102,14 @@ function InlineUrgentSwitch({ ticket, onSaved }: { ticket: Ticket; onSaved: () =
   const canEdit = !(user?.role === "it_handler" && ticket.itHandler !== user.name);
 
   return (
-    <Switch
+    <Input
       size="small"
-      checked={ticket.urgent}
-      loading={loading}
-      disabled={!canEdit}
-      onChange={toggle}
+      value={value}
+      disabled={saving || !canEdit}
+      placeholder="填写紧急"
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      onPressEnter={(e) => (e.target as HTMLInputElement).blur()}
     />
   );
 }
@@ -146,6 +154,49 @@ function InlineRemarkInput({ ticket, onSaved }: { ticket: Ticket; onSaved: () =>
   );
 }
 
+// 点击TAPD列地址：正常打开TAPD需求详情页的同时，触发一次只针对这一条工单的TAPD字段同步
+function TapdLinkCell({ ticket, onSynced }: { ticket: Ticket; onSynced: () => void }) {
+  const { user } = useAuthStore();
+  const [syncing, setSyncing] = useState(false);
+
+  async function handleClick() {
+    if (!user || syncing) return;
+    setSyncing(true);
+    try {
+      // 单条TAPD同步要走完整登录检查+跳转列表+点击跳转详情+等待内容加载一整套流程，
+      // 每一步最长都可能等到10分钟，叠加起来最坏情况能有小一个小时；用全局默认的15秒
+      // 超时的话，前端会在后端还在正常跑的时候就先放弃，用户看不到反馈、误以为没反应而
+      // 重复点击其他工单，导致后台越攒越多同时在跑的浏览器窗口
+      const res = await api.post(`/sync/tapd/${ticket.id}`, { actor: user.name }, { timeout: 3600000 });
+      const missing: string[] = res.data?.missingFields ?? [];
+      if (missing.length) {
+        // 同步流程执行成功，但部分字段没抓到——如实说清楚，避免误以为所有字段都更新了
+        message.warning(`工单 ${ticket.code} 已同步，但未获取到：${missing.join("、")}`, 6);
+      } else {
+        message.success(`工单 ${ticket.code} 的TAPD信息已同步`);
+      }
+      onSynced();
+    } catch (e: any) {
+      message.error(e?.response?.data?.message ?? "同步TAPD信息失败");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  if (!ticket.tapdUrl) {
+    return <Typography.Text type="secondary">-</Typography.Text>;
+  }
+
+  return (
+    <Space size={4}>
+      <a href={ticket.tapdUrl} target="_blank" rel="noreferrer" onClick={handleClick}>
+        查看
+      </a>
+      {syncing && <Spin size="small" />}
+    </Space>
+  );
+}
+
 export default function TicketCenter() {
   const { refreshTick } = useOutletContext<{ refreshTick: number }>();
   const location = useLocation();
@@ -166,6 +217,25 @@ export default function TicketCenter() {
   const [lastUpdateTime, setLastUpdateTime] = useState("");
   const [columnOrder, setColumnOrder] = useState<string[]>(loadColumnOrder);
 
+  // 表格高度不能写死：统计卡片、筛选栏（选中条件多时会换行）的高度都是变的。
+  // 这里实测表格容器剩余的可用高度，减掉表头后作为表体的滚动高度，
+  // 保证表格始终撑满一屏、且只在表格内部滚动，页面本身不出现滚动条
+  const tableWrapRef = useRef<HTMLDivElement>(null);
+  const [tableScrollY, setTableScrollY] = useState(360);
+  useEffect(() => {
+    const el = tableWrapRef.current;
+    if (!el) return;
+    const update = () => {
+      const headerHeight =
+        el.querySelector<HTMLElement>(".ant-table-thead")?.getBoundingClientRect().height ?? 39;
+      setTableScrollY(Math.max(160, Math.round(el.clientHeight - headerHeight)));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   useEffect(() => {
@@ -180,6 +250,13 @@ export default function TicketCenter() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key]);
+
+  // 头部"切换人员"选中的人（可多选）直接作用到列表：按 IT 受理人筛选，空则不限人员
+  const { targets } = useViewTargetStore();
+  useEffect(() => {
+    setFilters((f) => ({ ...f, itHandler: targets.length ? targets : undefined }));
+    setPage(1);
+  }, [targets]);
 
   const { setFilters: publishFilters } = useFilteredTicketsStore();
   useEffect(() => {
@@ -198,8 +275,9 @@ export default function TicketCenter() {
     setDetailOpen(true);
   }
 
-  async function handleExport() {
-    const res = await api.post("/export", filters, { responseType: "blob" });
+  // groupBy：requester=按发起人（原有逻辑），itHandler=按IT受理人
+  async function handleExport(groupBy: "requester" | "itHandler") {
+    const res = await api.post("/export", { ...filters, groupBy }, { responseType: "blob" });
     const url = URL.createObjectURL(res.data);
     const a = document.createElement("a");
     a.href = url;
@@ -242,14 +320,7 @@ export default function TicketCenter() {
         title: "TAPD",
         dataIndex: "tapdUrl",
         width: 90,
-        render: (url: string | null) =>
-          url ? (
-            <a href={url} target="_blank" rel="noreferrer">
-              查看
-            </a>
-          ) : (
-            <Typography.Text type="secondary">-</Typography.Text>
-          ),
+        render: (_: string | null, r: Ticket) => <TapdLinkCell ticket={r} onSynced={reload} />,
       },
       owningApp: { title: "归属应用", dataIndex: "owningApp", width: 110, ellipsis: true },
       requester: { title: "发起人", dataIndex: "requester", width: 90 },
@@ -304,7 +375,7 @@ export default function TicketCenter() {
         title: "紧急",
         dataIndex: "urgent",
         width: 70,
-        render: (_: boolean, r: Ticket) => <InlineUrgentSwitch ticket={r} onSaved={reload} />,
+        render: (_: string, r: Ticket) => <InlineUrgentInput ticket={r} onSaved={reload} />,
       },
       priority: { title: "优先级", dataIndex: "priority", width: 80, render: (v: string | null) => v ?? "-" },
       monthlyPlan: {
@@ -392,9 +463,20 @@ export default function TicketCenter() {
         onChange={setFilters}
         facets={facets}
         extra={
-          <Button icon={<ExportOutlined />} onClick={handleExport}>
-            导出
-          </Button>
+          <Dropdown
+            menu={{
+              items: [
+                { key: "requester", label: "按发起人导出" },
+                { key: "itHandler", label: "按IT受理人导出" },
+              ],
+              onClick: ({ key }) => handleExport(key as "requester" | "itHandler"),
+            }}
+            trigger={["click"]}
+          >
+            <Button size="small" icon={<ExportOutlined />}>
+              导出
+            </Button>
+          </Dropdown>
         }
         rightExtra={
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -404,8 +486,9 @@ export default function TicketCenter() {
       />
 
       <div className="tc-table-card">
-        <DndContext sensors={sensors} modifiers={[restrictToHorizontalAxis]} onDragEnd={handleDragEnd}>
-          <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
+        <div className="tc-table-scroll" ref={tableWrapRef}>
+          <DndContext sensors={sensors} modifiers={[restrictToHorizontalAxis]} onDragEnd={handleDragEnd}>
+            <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
             <Table
               rowKey="id"
               size="small"
@@ -414,8 +497,8 @@ export default function TicketCenter() {
               columns={columns}
               pagination={false}
               sticky
-              scroll={{ x: 2600, y: "calc(100vh - 420px)" }}
-              rowClassName={(r) => (r.urgent ? "row-urgent" : "")}
+              scroll={{ x: 2600, y: tableScrollY }}
+              rowClassName={(r) => (r.urgent.trim() ? "row-urgent" : "")}
               components={{ header: { cell: DraggableHeaderCell } }}
               onChange={(_, __, sorter: any) => {
                 if (sorter?.field) {
@@ -427,10 +510,12 @@ export default function TicketCenter() {
                 }
               }}
             />
-          </SortableContext>
-        </DndContext>
-        <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+            </SortableContext>
+          </DndContext>
+        </div>
+        <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
           <Pagination
+            size="small"
             current={page}
             pageSize={pageSize}
             total={total}

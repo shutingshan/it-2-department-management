@@ -1,13 +1,13 @@
 .ticket-center-page {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   height: calc(100vh - 88px);
 }
 
 .filter-bar {
   background: #fff;
-  padding: 12px 16px;
+  padding: 8px 12px;
   border-radius: 8px;
   display: flex;
   align-items: flex-start;
@@ -22,17 +22,35 @@
 .filter-bar-right {
   flex-shrink: 0;
   white-space: nowrap;
-  padding-top: 6px;
+  padding-top: 2px;
 }
 
 .tc-table-card {
   background: #fff;
   border-radius: 8px;
-  padding: 12px 16px;
+  padding: 8px 12px;
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* 表格区域吃掉卡片里除分页条以外的全部剩余高度；实际滚动高度由 JS 实测后传给 Table 的 scroll.y */
+.tc-table-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 筛选栏文字统一收小一号，跟 small 尺寸的控件更协调 */
+.filter-bar .ant-input,
+.filter-bar .ant-btn,
+.filter-bar .ant-select,
+.filter-bar .ant-select-selection-item,
+.filter-bar .ant-select-selection-placeholder,
+.filter-bar .ant-select-item-option-content,
+.filter-bar .ant-picker,
+.filter-bar .ant-picker-input > input {
+  font-size: 12px;
 }
 
 .dev-yellow {

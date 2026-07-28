@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Descriptions, Input, Modal, Space, Switch, Table, Tag, Timeline, Typography, message } from "antd";
+import { Button, Descriptions, Input, Modal, Space, Table, Tag, Timeline, Typography, message } from "antd";
 import { CopyOutlined, LinkOutlined } from "@ant-design/icons";
 import { api } from "../../api/client";
 import { formatIterations, hoursDeviation, STAGE_COLORS } from "../../api/types";
@@ -19,7 +19,7 @@ export default function DetailModal({
 }) {
   const { user } = useAuthStore();
   const [ticket, setTicket] = useState<Ticket | null>(null);
-  const [edited, setEdited] = useState<{ urgent?: boolean; remark?: string }>({});
+  const [edited, setEdited] = useState<{ urgent?: string; remark?: string }>({});
   const [saving, setSaving] = useState(false);
   const [subTab, setSubTab] = useState<"detail" | "history">("detail");
 
@@ -89,7 +89,7 @@ export default function DetailModal({
             }}
           />
           <Tag color={STAGE_COLORS[ticket.stage]}>{ticket.stage}</Tag>
-          {ticket.urgent && <Tag color="red">紧急</Tag>}
+          {ticket.urgent.trim() && <Tag color="red">{ticket.urgent}</Tag>}
         </Space>
       }
       footer={
@@ -136,11 +136,12 @@ export default function DetailModal({
             <Descriptions.Item label="状态">{ticket.status}</Descriptions.Item>
             <Descriptions.Item label="TAPD状态">{ticket.devStatus ?? "-"}</Descriptions.Item>
             <Descriptions.Item label="紧急">
-              <Switch
+              <Input
                 size="small"
                 disabled={!canEdit}
-                checked={edited.urgent ?? ticket.urgent}
-                onChange={(checked) => setEdited((s) => ({ ...s, urgent: checked }))}
+                placeholder="填写紧急"
+                value={edited.urgent ?? ticket.urgent}
+                onChange={(e) => setEdited((s) => ({ ...s, urgent: e.target.value }))}
               />
             </Descriptions.Item>
             <Descriptions.Item label="优先级">{ticket.priority ?? "-"}</Descriptions.Item>

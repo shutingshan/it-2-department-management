@@ -294,7 +294,7 @@ export function genTicket(year: number, seqInYear: number, submittedAt: dayjs.Da
     stage,
     status,
     devStatus,
-    urgent: rand() > 0.85,
+    urgent: rand() > 0.85 ? "紧急" : "",
     remark: "",
     priority: pick(["High High", "High", "Middle", "Low"]),
     isReturned: rand() > 0.9,

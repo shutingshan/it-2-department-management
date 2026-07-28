@@ -39,7 +39,23 @@ export const config = {
     },
   },
   tapd: {
-    // TAPD 用扫码登录，没有账号密码；登录态通过 backend/.auth/tapd-state.json 复用
+    // 取数方式：api=开放平台API（默认，需要API账号口令）；browser=浏览器页面爬取
+    //（需要先 npm run tapd:login 扫码，运行时会弹出可见浏览器窗口）
+    get fetchMode(): "api" | "browser" {
+      return process.env.TAPD_FETCH_MODE === "browser" ? "browser" : "api";
+    },
+    // ---- 开放平台 API（现用方案）----
+    // API账号/口令跟登录TAPD用的账号密码不是一回事，需要公司管理员在 TAPD 后台单独开通
+    get apiBaseUrl() {
+      return process.env.TAPD_API_BASE_URL || "https://api.tapd.cn";
+    },
+    get apiUser() {
+      return required("TAPD_API_USER");
+    },
+    get apiPassword() {
+      return required("TAPD_API_PASSWORD");
+    },
+    // ---- 以下为浏览器自动化方案遗留配置（已不用于取数，保留仅为兼容）----
     get baseUrl() {
       return process.env.TAPD_BASE_URL || "https://www.tapd.cn/";
     },

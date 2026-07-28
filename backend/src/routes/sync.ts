@@ -1,16 +1,24 @@
 import { Router } from "express";
 import dayjs from "dayjs";
-import { Browser, BrowserContext } from "playwright";
 import { store } from "../store";
-import { resolveStage } from "../mapping";
+import { dedupe, resolveStage, stripCurrentIterationTag } from "../mapping";
 import { fetchTapdDelta } from "../adapters/tapd";
 import { SyncJob } from "../store";
 import { ScrapedRow, scrapeDangquyunTicketList } from "../scrapers/dangquyunScraper";
 import { mapScrapedRowToTicket } from "../scrapers/dangquyunMapper";
-import { getHeadlessAuthenticatedContext, launchHeadlessBrowser } from "../scrapers/tapdAuth";
-import { scrapeTapdStoryFields } from "../scrapers/tapdScraper";
+import { fetchTapdStoryFields, TapdStoryFields } from "../scrapers/tapdApi";
+import { scrapeTapdStoryFieldsViaBrowser } from "../scrapers/tapdScraper";
+import { config } from "../config";
 import { applyFilters, parseQuery, TicketQuery } from "../filter";
 import { Ticket } from "../types";
+
+// TAPD 取数入口：按 .env 里 TAPD_FETCH_MODE 在 开放平台API / 浏览器页面爬取 两种方式间切换，
+// 两种方式返回同一套字段结构，后续的字段应用/阶段重算逻辑完全一致
+function fetchTapdFields(tapdUrl: string): Promise<TapdStoryFields> {
+  return config.tapd.fetchMode === "browser"
+    ? scrapeTapdStoryFieldsViaBrowser(tapdUrl)
+    : fetchTapdStoryFields(tapdUrl);
+}
 
 // 按工单中心当前筛选条件圈定候选工单；未传筛选条件时回退到"全部未完成/未关闭工单"；
 // 无论是否传筛选条件，均只对"未完成未关闭"的工单批量处理，不逐条处理已完成/已关闭的工单
@@ -83,9 +91,17 @@ export function applyScrapedRows(rows: ScrapedRow[], isFull: boolean) {
   return { addedCount, updatedCount, failedCount, failReasons };
 }
 
+// 获取新工单没有进度轮询的 job 机制，容易在等待时间变长后被误以为"没反应"而重复点击，
+// 导致两次抓取同时跑、共用同一份浏览器登录态文件互相干扰；这里用一个模块级标记防止并发执行
+let fetchNewRunning = false;
+
 // 获取新工单：供路由与定时任务共用；失败时已在此处记录变更日志并向上抛出。
 // 完成后会把结果写入 store.currentJob（type: fetch_new），供前端沿用既有的悬浮进度弹窗展示
 export async function runFetchNew(actor: string, mode?: "incremental" | "full") {
+  if (fetchNewRunning) {
+    throw new Error("已有获取新工单任务在执行中，请等待其完成后再试");
+  }
+  fetchNewRunning = true;
   const isFull = mode === "full";
   const startedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
   try {
@@ -131,6 +147,8 @@ export async function runFetchNew(actor: string, mode?: "incremental" | "full") 
       detail: "获取新工单失败",
     });
     throw e;
+  } finally {
+    fetchNewRunning = false;
   }
 }
 
@@ -280,9 +298,157 @@ router.post("/terminate", (req, res) => {
   res.json({ job: store.currentJob });
 });
 
+// 把抓到的TAPD字段应用到工单上并按需重新计算工单阶段；批量任务和单条同步共用同一份逻辑，
+// 避免两处各写一套导致字段口径不一致。各字段"取不到就保持工单原值不动"，不会用空值覆盖
+function applyTapdFields(ticket: Ticket, fields: TapdStoryFields) {
+  // TAPD 上确认没填的字段：工单里也要跟着清空，保证两边一致（界面上即显示为"-"）。
+  // 只有"抓取失败没读到"的字段才保持工单原值不动
+  const isEmptyOnTapd = (name: string) => fields.emptyFields.includes(name);
+
+  if (fields.tapdStatus) ticket.devStatus = fields.tapdStatus;
+  else if (isEmptyOnTapd("TAPD状态")) ticket.devStatus = null;
+
+  if (fields.estimatedHours !== null) ticket.estimatedHours = fields.estimatedHours;
+  else if (isEmptyOnTapd("预估工时")) ticket.estimatedHours = 0;
+
+  if (fields.actualHours !== null) ticket.actualHours = fields.actualHours;
+  else if (isEmptyOnTapd("完成工时")) ticket.actualHours = 0;
+
+  if (fields.developer.length) ticket.developer = fields.developer;
+  else if (isEmptyOnTapd("开发人员")) ticket.developer = [];
+
+  if (fields.currentHandler) ticket.currentHandler = fields.currentHandler;
+  else if (isEmptyOnTapd("处理人")) ticket.currentHandler = "";
+
+  // 迭代：按名称去重合并进已有列表（历史迭代保留），当前迭代不存在时追加；
+  // TAPD 上确认没有迭代时清空（会连带让工单阶段回落到"待排期"，这是预期行为）
+  if (fields.iterationName) {
+    const name = fields.iterationName;
+    const exists = ticket.iterations.some(
+      (i) => stripCurrentIterationTag(i.name) === stripCurrentIterationTag(name)
+    );
+    if (!exists) {
+      ticket.iterations.push({ name, start: fields.iterationStart ?? "", end: fields.iterationEnd ?? "" });
+    }
+  } else if (isEmptyOnTapd("迭代")) {
+    ticket.iterations = [];
+  }
+
+  // 月度计划：去重合并
+  if (fields.monthlyPlan.length) {
+    ticket.monthlyPlan = dedupe([...ticket.monthlyPlan, ...fields.monthlyPlan]);
+  } else if (isEmptyOnTapd("月度计划")) {
+    ticket.monthlyPlan = [];
+  }
+
+  // 子需求：null 表示本次没能获取（保持原值），空数组表示确认没有子需求
+  if (fields.subStories !== null) {
+    ticket.subTickets = fields.subStories.map((s) => ({
+      id: s.storyId,
+      code: s.storyId,
+      tapdUrl: s.tapdUrl,
+      title: s.title,
+      productManager: "",
+      developer: s.developer.join("、"),
+      tester: s.tester.join("、"),
+      currentHandler: s.currentHandler ?? "",
+      tapdStatus: s.tapdStatus,
+      monthlyPlan: [],
+      iteration: s.iterationName ? { name: s.iterationName, start: "", end: "" } : null,
+      estimatedHours: s.estimatedHours ?? 0,
+      actualHours: s.actualHours ?? 0,
+    }));
+  }
+
+  const newStage = resolveStage(ticket.status, ticket.devStatus, ticket.iterations);
+  if (newStage !== ticket.stage) {
+    store.addChangeLog(ticket, [
+      {
+        field: "stage",
+        oldValue: ticket.stage,
+        newValue: newStage,
+        time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
+        actor: "系统同步",
+      },
+    ]);
+    ticket.stage = newStage;
+  }
+}
+
+// 同一条工单不允许被批量任务和"点击TAPD地址"单条同步同时处理，避免两边并发写同一个 ticket 对象
+const ticketsSyncingTapd = new Set<string>();
+
+// 点击工单列表 TAPD 列地址时触发：只同步这一条工单，不占用批量任务的进度弹窗/store.currentJob。
+// 无独立并发锁保护批量任务本身（批量任务见 startTapdJob），但会跟批量任务共享同一份"正在同步"标记，
+// 防止同一条工单被两边同时处理
+export async function syncSingleTicketTapd(ticket: Ticket, actor: string): Promise<TapdStoryFields> {
+  if (!ticket.tapdUrl) {
+    throw new Error("该工单未关联TAPD地址");
+  }
+  if (ticketsSyncingTapd.has(ticket.id)) {
+    throw new Error("该工单正在同步TAPD信息，请稍后再试");
+  }
+  ticketsSyncingTapd.add(ticket.id);
+  const time = () => dayjs().format("YYYY-MM-DD HH:mm:ss");
+  try {
+    const fields = await fetchTapdFields(ticket.tapdUrl);
+    applyTapdFields(ticket, fields);
+    ticket.tapdErrorNote = null;
+    store.addLog({
+      type: "同步TAPD",
+      time: time(),
+      actor,
+      success: true,
+      failReason: null,
+      detail: `单条同步TAPD：工单 ${ticket.code}`,
+    });
+    return fields;
+  } catch (e) {
+    const reason = (e as Error).message ?? "TAPD 同步失败";
+    ticket.tapdErrorNote = { time: time(), message: reason };
+    store.addLog({
+      type: "同步TAPD",
+      time: time(),
+      actor,
+      success: false,
+      failReason: reason,
+      detail: `单条同步TAPD失败：工单 ${ticket.code}`,
+    });
+    throw e;
+  } finally {
+    ticketsSyncingTapd.delete(ticket.id);
+  }
+}
+
+router.post("/tapd/:id", async (req, res) => {
+  const ticket = store.getTicket(req.params.id);
+  if (!ticket) return res.status(404).json({ message: "工单不存在" });
+  const { actor } = req.body as { actor?: string };
+  try {
+    const fields = await syncSingleTicketTapd(ticket, actor ?? "未知");
+    // 只报告"真正没抓到"的字段：TAPD 上本来就没填（emptyFields）的不算异常，
+    // 那种情况工单里已经跟着清空了，两边是一致的
+    const missingFields: string[] = [];
+    const check = (name: string, got: boolean) => {
+      if (!got && !fields.emptyFields.includes(name)) missingFields.push(name);
+    };
+    check("TAPD状态", !!fields.tapdStatus);
+    check("预估工时", fields.estimatedHours !== null);
+    check("完成工时", fields.actualHours !== null);
+    check("开发人员", fields.developer.length > 0);
+    check("测试人员", fields.tester.length > 0);
+    check("处理人", !!fields.currentHandler);
+    check("迭代", !!fields.iterationName);
+    check("月度计划", fields.monthlyPlan.length > 0);
+    if (fields.subStories === null) missingFields.push("子需求列表");
+    res.json({ data: ticket, missingFields });
+  } catch (e) {
+    res.status(500).json({ message: (e as Error).message ?? "同步TAPD信息失败" });
+  }
+});
+
 // 获取TAPD信息：供路由与定时任务共用；不传 filters 时默认仅覆盖未完成未关闭且有TAPD地址的数据。
-// 按条更新（每条各自开一个页面抓取），整个任务共用一个已登录的浏览器上下文；
-// 若登录态无效/已过期，任务直接整体失败（不会在服务器上弹出无人可见的扫码窗口）
+// 按条更新（每条各自调一次 TAPD 开放平台 API），单条失败只影响该条，不中断整个任务
 export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; done: Promise<SyncJob> } {
   const candidates = resolveCandidates(filters).filter((t) => t.tapdUrl);
   const job: SyncJob = {
@@ -303,94 +469,54 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
     jobDoneResolver = resolve;
   });
 
-  (async () => {
-    let browser: Browser | null = null;
-    let context: BrowserContext | null = null;
-    try {
-      browser = await launchHeadlessBrowser();
-      context = await getHeadlessAuthenticatedContext(browser);
-    } catch (e) {
-      const reason = (e as Error).message ?? "TAPD 登录态无效";
-      job.status = "failed";
-      job.failed = job.total;
-      job.processed = job.total;
-      job.failReasons = [reason];
+  let idx = 0;
+  stopJobTimer();
+  jobTimer = setInterval(async () => {
+    if (job.status !== "running") {
+      finishJob(job);
+      return;
+    }
+    const batch = candidates.slice(idx, idx + 5);
+    idx += 5;
+    for (const ticket of batch) {
+      // 这条工单正被"点击TAPD地址"单条同步占用，本轮批量跳过，避免并发写同一个 ticket 对象
+      if (ticketsSyncingTapd.has(ticket.id)) {
+        job.failed += 1;
+        job.failReasons.push(`${ticket.code}: 该工单正在被单条同步占用，本次批量跳过`);
+        job.processed += 1;
+        continue;
+      }
+      ticketsSyncingTapd.add(ticket.id);
+      try {
+        const fields = await fetchTapdFields(ticket.tapdUrl!);
+        applyTapdFields(ticket, fields);
+        ticket.tapdErrorNote = null; // 本次同步成功，清除历史异常标记
+        job.success += 1;
+      } catch (e) {
+        const reason = (e as Error).message ?? "TAPD 同步失败";
+        job.failed += 1;
+        job.failReasons.push(`${ticket.code}: ${reason}`);
+        // 按条更新：更新失败记录到 TAPD 异常备注字段，保留时间与原因
+        ticket.tapdErrorNote = { time: dayjs().format("YYYY-MM-DD HH:mm:ss"), message: reason };
+      } finally {
+        ticketsSyncingTapd.delete(ticket.id);
+      }
+      job.processed += 1;
+    }
+    if (idx >= candidates.length) {
+      job.status = "done";
       job.finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
       store.addLog({
         type: "同步TAPD",
         time: job.finishedAt,
         actor,
-        success: false,
-        failReason: reason,
-        detail: "获取TAPD登录态失败，整个同步任务未执行",
+        success: job.failed === 0,
+        failReason: job.failed ? job.failReasons.join("; ") : null,
+        detail: `同步 TAPD 完成，成功 ${job.success} 条，失败 ${job.failed} 条`,
       });
-      if (browser) await browser.close().catch(() => {});
       finishJob(job);
-      return;
     }
-
-    const authedContext = context;
-    let idx = 0;
-    stopJobTimer();
-    jobTimer = setInterval(async () => {
-      if (job.status !== "running") {
-        finishJob(job);
-        await authedContext.close().catch(() => {});
-        await browser!.close().catch(() => {});
-        return;
-      }
-      const batch = candidates.slice(idx, idx + 5);
-      idx += 5;
-      for (const ticket of batch) {
-        try {
-          const fields = await scrapeTapdStoryFields(authedContext, ticket.tapdUrl!);
-          if (fields.tapdStatus) ticket.devStatus = fields.tapdStatus;
-          if (fields.estimatedHours !== null) ticket.estimatedHours = fields.estimatedHours;
-          if (fields.actualHours !== null) ticket.actualHours = fields.actualHours;
-          if (fields.developer.length) ticket.developer = fields.developer;
-          if (fields.currentHandler) ticket.currentHandler = fields.currentHandler;
-
-          const newStage = resolveStage(ticket.status, ticket.devStatus, ticket.iterations);
-          if (newStage !== ticket.stage) {
-            store.addChangeLog(ticket, [
-              {
-                field: "stage",
-                oldValue: ticket.stage,
-                newValue: newStage,
-                time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
-                actor: "系统同步",
-              },
-            ]);
-            ticket.stage = newStage;
-          }
-          ticket.tapdErrorNote = null; // 本次同步成功，清除历史异常标记
-          job.success += 1;
-        } catch (e) {
-          const reason = (e as Error).message ?? "TAPD 同步失败";
-          job.failed += 1;
-          job.failReasons.push(`${ticket.code}: ${reason}`);
-          // 按条更新：更新失败记录到 TAPD 异常备注字段，保留时间与原因
-          ticket.tapdErrorNote = { time: dayjs().format("YYYY-MM-DD HH:mm:ss"), message: reason };
-        }
-        job.processed += 1;
-      }
-      if (idx >= candidates.length) {
-        job.status = "done";
-        job.finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
-        store.addLog({
-          type: "同步TAPD",
-          time: job.finishedAt,
-          actor,
-          success: job.failed === 0,
-          failReason: job.failed ? job.failReasons.join("; ") : null,
-          detail: `同步 TAPD 完成，成功 ${job.success} 条，失败 ${job.failed} 条`,
-        });
-        await authedContext.close().catch(() => {});
-        await browser!.close().catch(() => {});
-        finishJob(job);
-      }
-    }, 400);
-  })();
+  }, 400);
 
   return { job, done };
 }
