@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Input, Pagination, Space, Spin, Switch, Table, Tag, Tooltip, Typography, message } from "antd";
+import { Button, Dropdown, Input, Pagination, Space, Spin, Switch, Table, Tag, Tooltip, Typography, message } from "antd";
 import { CopyOutlined, ExportOutlined } from "@ant-design/icons";
 import type { ColumnsType, ColumnType } from "antd/es/table";
 import {
@@ -235,8 +235,9 @@ export default function TicketCenter() {
     setDetailOpen(true);
   }
 
-  async function handleExport() {
-    const res = await api.post("/export", filters, { responseType: "blob" });
+  // groupBy：requester=按发起人（原有逻辑），itHandler=按IT受理人
+  async function handleExport(groupBy: "requester" | "itHandler") {
+    const res = await api.post("/export", { ...filters, groupBy }, { responseType: "blob" });
     const url = URL.createObjectURL(res.data);
     const a = document.createElement("a");
     a.href = url;
@@ -422,9 +423,18 @@ export default function TicketCenter() {
         onChange={setFilters}
         facets={facets}
         extra={
-          <Button icon={<ExportOutlined />} onClick={handleExport}>
-            导出
-          </Button>
+          <Dropdown
+            menu={{
+              items: [
+                { key: "requester", label: "按发起人导出" },
+                { key: "itHandler", label: "按IT受理人导出" },
+              ],
+              onClick: ({ key }) => handleExport(key as "requester" | "itHandler"),
+            }}
+            trigger={["click"]}
+          >
+            <Button icon={<ExportOutlined />}>导出</Button>
+          </Dropdown>
         }
         rightExtra={
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
