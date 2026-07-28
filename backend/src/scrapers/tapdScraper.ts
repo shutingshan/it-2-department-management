@@ -211,18 +211,48 @@ export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promis
   // 之前的做法是"页面上出现任意文字就认为加载完成，然后只抓取一次"——但详情页的侧边栏/菜单等
   // 骨架文字远早于详情内容出现（实测详情区域会白屏很久），一次性抓取几乎必然赶在内容渲染前，
   // 空手而归后直接报错。这跟当曲云微前端首屏的问题同类，用同样的解法：反复尝试抓取，
-  // 抓到字段或超时（10分钟）才停，顺带在循环里检查是否撞上WAF拦截页
+  // 抓到字段或超时（10分钟）才停，顺带在循环里检查是否撞上WAF拦截页。
+  //
+  // 另外不能"抓到任意一个字段就立刻返回"：详情页左侧主内容（状态等）先渲染、右侧"基础信息"
+  // 面板（工时/开发人员/处理人）明显更晚，过早返回会导致右侧字段全是空的。所以抓到字段后
+  // 继续在页面上停留、反复重抓，直到字段数量连续多轮不再增加（说明右侧也渲染完了）才返回
   const deadline = Date.now() + 600000;
+  const countFields = (f: TapdStoryFields) =>
+    (f.tapdStatus ? 1 : 0) +
+    (f.estimatedHours !== null ? 1 : 0) +
+    (f.actualHours !== null ? 1 : 0) +
+    (f.developer.length ? 1 : 0) +
+    (f.currentHandler ? 1 : 0);
+  const TOTAL_FIELDS = 5;
+  // 字段数量连续5轮（约15秒）没有再增加，就认为页面已经渲染稳定，接受当前结果
+  // （部分字段在TAPD上本来就可能是空的，所以不能死等到5个全抓到）
+  const STABLE_ROUNDS = 5;
+
+  let best: TapdStoryFields | null = null;
+  let bestCount = 0;
+  let stableRounds = 0;
   while (Date.now() < deadline) {
     if (await isWafBlocked(page)) {
       await dumpDebug(page, "waf-blocked");
       throw new Error("访问TAPD需求详情页被安全网关拦截（浏览器被识别为自动化工具），需要调整反检测配置");
     }
     const fields = await extractFieldsOnce(page);
-    if (fields) return fields;
+    if (fields) {
+      const count = countFields(fields);
+      if (count > bestCount) {
+        best = fields;
+        bestCount = count;
+        stableRounds = 0;
+        if (count >= TOTAL_FIELDS) return fields; // 5个字段全到手，不用再等了
+      } else {
+        stableRounds += 1;
+        if (stableRounds >= STABLE_ROUNDS) return best!;
+      }
+    }
     await page.waitForTimeout(3000);
   }
 
+  if (best) return best; // 超时但好歹抓到了一部分，能同步多少是多少
   await dumpDebug(page, "no-fields-matched");
   throw new Error(
     "等待10分钟仍未能识别到任何TAPD字段：页面内容一直没有渲染出来，或页面结构与预期不符（截图/HTML已存到 backend/.auth/debug/）"
