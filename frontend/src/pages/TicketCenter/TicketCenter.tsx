@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Dropdown, Input, Pagination, Space, Spin, Switch, Table, Tag, Tooltip, Typography, message } from "antd";
 import { CopyOutlined, ExportOutlined } from "@ant-design/icons";
 import type { ColumnsType, ColumnType } from "antd/es/table";
@@ -208,6 +208,25 @@ export default function TicketCenter() {
   const [subTicketsFor, setSubTicketsFor] = useState<Ticket | null>(null);
   const [lastUpdateTime, setLastUpdateTime] = useState("");
   const [columnOrder, setColumnOrder] = useState<string[]>(loadColumnOrder);
+
+  // 表格高度不能写死：统计卡片、筛选栏（选中条件多时会换行）的高度都是变的。
+  // 这里实测表格容器剩余的可用高度，减掉表头后作为表体的滚动高度，
+  // 保证表格始终撑满一屏、且只在表格内部滚动，页面本身不出现滚动条
+  const tableWrapRef = useRef<HTMLDivElement>(null);
+  const [tableScrollY, setTableScrollY] = useState(360);
+  useEffect(() => {
+    const el = tableWrapRef.current;
+    if (!el) return;
+    const update = () => {
+      const headerHeight =
+        el.querySelector<HTMLElement>(".ant-table-thead")?.getBoundingClientRect().height ?? 39;
+      setTableScrollY(Math.max(160, Math.round(el.clientHeight - headerHeight)));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -452,8 +471,9 @@ export default function TicketCenter() {
       />
 
       <div className="tc-table-card">
-        <DndContext sensors={sensors} modifiers={[restrictToHorizontalAxis]} onDragEnd={handleDragEnd}>
-          <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
+        <div className="tc-table-scroll" ref={tableWrapRef}>
+          <DndContext sensors={sensors} modifiers={[restrictToHorizontalAxis]} onDragEnd={handleDragEnd}>
+            <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
             <Table
               rowKey="id"
               size="small"
@@ -462,7 +482,7 @@ export default function TicketCenter() {
               columns={columns}
               pagination={false}
               sticky
-              scroll={{ x: 2600, y: "calc(100vh - 420px)" }}
+              scroll={{ x: 2600, y: tableScrollY }}
               rowClassName={(r) => (r.urgent ? "row-urgent" : "")}
               components={{ header: { cell: DraggableHeaderCell } }}
               onChange={(_, __, sorter: any) => {
@@ -475,10 +495,12 @@ export default function TicketCenter() {
                 }
               }}
             />
-          </SortableContext>
-        </DndContext>
-        <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+            </SortableContext>
+          </DndContext>
+        </div>
+        <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
           <Pagination
+            size="small"
             current={page}
             pageSize={pageSize}
             total={total}

@@ -35,7 +35,8 @@ export default function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const [refreshTick, setRefreshTick] = useState(0);
-  const [collapsed, setCollapsed] = useState(false);
+  // 侧边栏默认收起，把横向空间尽量留给工单列表（列很多，需要横向滚动）
+  const [collapsed, setCollapsed] = useState(true);
 
   if (!user) {
     return <Navigate to="/login" replace />;
