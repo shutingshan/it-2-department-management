@@ -14,6 +14,7 @@ import path from "path";
 import { Frame, Page } from "playwright";
 import { config } from "../config";
 import { getTapdAuthenticatedContext, isWafBlocked, launchTapdBrowser } from "./tapdAuth";
+import { TapdStoryFields, TapdSubStoryFields } from "./tapdApi";
 
 const DEBUG_DIR = path.join(__dirname, "../../.auth/debug");
 
@@ -79,13 +80,8 @@ function parseNameList(v: string | null): string[] {
   return Array.from(new Set(v.split(/[、,，;；\s]+/).map((s) => s.trim()).filter(Boolean)));
 }
 
-export interface TapdStoryFields {
-  tapdStatus: string | null;
-  estimatedHours: number | null;
-  actualHours: number | null;
-  developer: string[];
-  currentHandler: string | null;
-}
+// 字段结构与 API 模式共用同一份定义（tapdApi.ts），保证两种取数方式对上层完全等价
+export type { TapdStoryFields, TapdSubStoryFields } from "./tapdApi";
 
 // TAPD 需求详情页数据多为异步加载，页面骨架可能先于实际字段渲染出来（实测首次渲染可能较慢，
 // 跟当曲云类似）；最多等 10 分钟让内容真正加载完，而不是固定睡一小段时间就去抓取
@@ -185,47 +181,125 @@ async function extractFieldsOnce(page: Page): Promise<TapdStoryFields | null> {
   const estimatedHours = parseHours(await findLabel("预估工时"));
   const actualHours = parseHours(await findLabel("完成工时", "消耗工时"));
   const developer = parseNameList(await findLabel("开发人员"));
+  const tester = parseNameList(await findLabel("测试人员"));
   const currentHandler = await findLabel("处理人", "当前处理人");
+  const iterationName = await findLabel("迭代");
+  const monthlyPlan = parseNameList(await findLabel("月度计划"));
 
   const gotAnything =
-    tapdStatus || estimatedHours !== null || actualHours !== null || developer.length || currentHandler;
+    tapdStatus ||
+    estimatedHours !== null ||
+    actualHours !== null ||
+    developer.length ||
+    tester.length ||
+    currentHandler ||
+    iterationName ||
+    monthlyPlan.length;
   if (!gotAnything) return null;
-  return { tapdStatus, estimatedHours, actualHours, developer, currentHandler };
+  return {
+    tapdStatus,
+    estimatedHours,
+    actualHours,
+    developer,
+    tester,
+    currentHandler,
+    iterationName,
+    // 页面上只能看到迭代名称，起止日期拿不到
+    iterationStart: null,
+    iterationEnd: null,
+    monthlyPlan,
+    subStories: null, // 子需求列表由 extractSubStories 单独尝试补齐
+  };
 }
 
-export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promise<TapdStoryFields> {
-  // 实测：直接跳到需求详情深链接会被应用自己重定向回该空间的"需求列表"页
-  // （用户在自己日常登录的浏览器里直接访问同一个地址是正常的），所以先到列表页热身，
-  // 再用真实点击（而非 page.goto，会被同样的机制拦截/取消导航）跳到具体详情地址
-  const listUrl = deriveWorkspaceListUrl(tapdUrl);
-  if (listUrl) {
-    await page.goto(listUrl, { waitUntil: "domcontentloaded", timeout: 600000 }).catch(() => {});
-    await waitForContentToLoad(page);
-    await clickToNavigate(page, tapdUrl);
-  } else {
-    // 极少数情况下解析不出空间 id，退化成直接跳转；net::ERR_ABORTED 常见于目标页面自己
-    // 用客户端路由拦截、取消了这次导航（页面实际可能已经正确切换过去了），不能当成致命错误
-    await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 600000 }).catch(() => {});
-  }
+// 尝试切到"子需求"页签并抓取子需求列表。整个过程是尽力而为：
+// 页签不存在（该需求没有子需求）、表格结构认不出来等情况一律返回 null，
+// 不影响主字段的同步结果（工单原有的子需求数据保持不动）
+async function extractSubStories(page: Page): Promise<TapdSubStoryFields[] | null> {
+  try {
+    // 详情页里"子需求"通常是一个页签/锚点文字（可能带数量后缀，如"子需求 (3)"）
+    const tab = page.getByText(/^子需求/, { exact: false }).first();
+    if ((await tab.count()) === 0) return null;
+    await tab.click({ timeout: 10000 });
+    await page.waitForTimeout(5000);
 
-  // 之前的做法是"页面上出现任意文字就认为加载完成，然后只抓取一次"——但详情页的侧边栏/菜单等
-  // 骨架文字远早于详情内容出现（实测详情区域会白屏很久），一次性抓取几乎必然赶在内容渲染前，
-  // 空手而归后直接报错。这跟当曲云微前端首屏的问题同类，用同样的解法：反复尝试抓取，
-  // 抓到字段或超时（10分钟）才停，顺带在循环里检查是否撞上WAF拦截页。
-  //
-  // 另外不能"抓到任意一个字段就立刻返回"：详情页左侧主内容（状态等）先渲染、右侧"基础信息"
-  // 面板（工时/开发人员/处理人）明显更晚，过早返回会导致右侧字段全是空的。所以抓到字段后
-  // 继续在页面上停留、反复重抓，直到字段数量连续多轮不再增加（说明右侧也渲染完了）才返回
-  const deadline = Date.now() + 600000;
+    // 子需求列表一般渲染成表格：表头含"标题"，行内是各子需求的字段
+    for (const target of [page, ...page.frames()] as Locatable[]) {
+      const rows = await target
+        .evaluate(() => {
+          const tables = Array.from(document.querySelectorAll("table"));
+          for (const table of tables) {
+            const headers = Array.from(table.querySelectorAll("thead th, thead td")).map((th) =>
+              (th.textContent ?? "").trim()
+            );
+            if (!headers.some((h) => h.includes("标题") || h.includes("名称"))) continue;
+            return Array.from(table.querySelectorAll("tbody tr")).map((tr) => {
+              const cells = Array.from(tr.querySelectorAll("td"));
+              const row: Record<string, string> = {};
+              headers.forEach((h, i) => {
+                if (h) row[h] = (cells[i]?.textContent ?? "").trim();
+              });
+              // 标题列里如果有链接，一并带出链接地址（用于子需求的TAPD地址）
+              const link = tr.querySelector("a[href*='story']") as HTMLAnchorElement | null;
+              if (link?.href) row.__href = link.href;
+              return row;
+            });
+          }
+          return null;
+        })
+        .catch(() => null);
+
+      if (rows && rows.length > 0) {
+        const pick = (row: Record<string, string>, ...keys: string[]) => {
+          for (const k of Object.keys(row)) {
+            if (keys.some((key) => k.includes(key))) return row[k];
+          }
+          return "";
+        };
+        return rows.map((row, idx) => ({
+          storyId: row.__href?.match(/(\d+)(?:[/?#].*)?$/)?.[1] ?? String(idx + 1),
+          title: pick(row, "标题", "名称"),
+          tapdUrl: row.__href ?? null,
+          tapdStatus: pick(row, "状态") || null,
+          developer: parseNameList(pick(row, "开发人员")),
+          tester: parseNameList(pick(row, "测试人员")),
+          currentHandler: pick(row, "处理人") || null,
+          estimatedHours: parseHours(pick(row, "预估工时")),
+          actualHours: parseHours(pick(row, "完成工时", "消耗工时")),
+          iterationName: pick(row, "迭代") || null,
+        }));
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// 在"当前已经停在某个需求详情页"的前提下，反复尝试抓取主字段直到渲染稳定或超时。
+//
+// 之前的做法是"页面上出现任意文字就认为加载完成，然后只抓取一次"——但详情页的侧边栏/菜单等
+// 骨架文字远早于详情内容出现（实测详情区域会白屏很久），一次性抓取几乎必然赶在内容渲染前，
+// 空手而归后直接报错。这跟当曲云微前端首屏的问题同类，用同样的解法：反复尝试抓取，
+// 抓到字段或超时才停，顺带在循环里检查是否撞上WAF拦截页。
+//
+// 另外不能"抓到任意一个字段就立刻返回"：详情页左侧主内容（状态等）先渲染、右侧"基础信息"
+// 面板（工时/开发人员/处理人等）明显更晚，过早返回会导致右侧字段全是空的。所以抓到字段后
+// 继续在页面上停留、反复重抓，直到字段数量连续多轮不再增加（说明右侧也渲染完了）才返回
+async function extractStoryDetailFields(page: Page, timeoutMs: number): Promise<TapdStoryFields> {
+  const deadline = Date.now() + timeoutMs;
   const countFields = (f: TapdStoryFields) =>
     (f.tapdStatus ? 1 : 0) +
     (f.estimatedHours !== null ? 1 : 0) +
     (f.actualHours !== null ? 1 : 0) +
     (f.developer.length ? 1 : 0) +
-    (f.currentHandler ? 1 : 0);
-  const TOTAL_FIELDS = 5;
+    (f.tester.length ? 1 : 0) +
+    (f.currentHandler ? 1 : 0) +
+    (f.iterationName ? 1 : 0) +
+    (f.monthlyPlan.length ? 1 : 0);
+  const TOTAL_FIELDS = 8;
   // 字段数量连续5轮（约15秒）没有再增加，就认为页面已经渲染稳定，接受当前结果
-  // （部分字段在TAPD上本来就可能是空的，所以不能死等到5个全抓到）
+  // （部分字段在TAPD上本来就可能是空的，所以不能死等到全部抓到）
   const STABLE_ROUNDS = 5;
 
   let best: TapdStoryFields | null = null;
@@ -243,7 +317,7 @@ export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promis
         best = fields;
         bestCount = count;
         stableRounds = 0;
-        if (count >= TOTAL_FIELDS) return fields; // 5个字段全到手，不用再等了
+        if (count >= TOTAL_FIELDS) return fields; // 全部字段到手，不用再等了
       } else {
         stableRounds += 1;
         if (stableRounds >= STABLE_ROUNDS) return best!;
@@ -255,8 +329,58 @@ export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promis
   if (best) return best; // 超时但好歹抓到了一部分，能同步多少是多少
   await dumpDebug(page, "no-fields-matched");
   throw new Error(
-    "等待10分钟仍未能识别到任何TAPD字段：页面内容一直没有渲染出来，或页面结构与预期不符（截图/HTML已存到 backend/.auth/debug/）"
+    `等待${Math.round(timeoutMs / 60000)}分钟仍未能识别到任何TAPD字段：页面内容一直没有渲染出来，或页面结构与预期不符（截图/HTML已存到 backend/.auth/debug/）`
   );
+}
+
+export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promise<TapdStoryFields> {
+  // 实测：直接跳到需求详情深链接会被应用自己重定向回该空间的"需求列表"页
+  // （用户在自己日常登录的浏览器里直接访问同一个地址是正常的），所以先到列表页热身，
+  // 再用真实点击（而非 page.goto，会被同样的机制拦截/取消导航）跳到具体详情地址
+  const listUrl = deriveWorkspaceListUrl(tapdUrl);
+  if (listUrl) {
+    await page.goto(listUrl, { waitUntil: "domcontentloaded", timeout: 600000 }).catch(() => {});
+    await waitForContentToLoad(page);
+    await clickToNavigate(page, tapdUrl);
+  } else {
+    // 极少数情况下解析不出空间 id，退化成直接跳转；net::ERR_ABORTED 常见于目标页面自己
+    // 用客户端路由拦截、取消了这次导航（页面实际可能已经正确切换过去了），不能当成致命错误
+    await page.goto(tapdUrl, { waitUntil: "domcontentloaded", timeout: 600000 }).catch(() => {});
+  }
+
+  // 主需求详情页：最长等10分钟；抓完把现场存档，便于核对字段是不是抓对了
+  const fields = await extractStoryDetailFields(page, 600000);
+  await dumpDebug(page, "extracted");
+
+  // 子需求：先切"子需求"页签拿到列表（标题/链接与行内字段），再逐条真实点击进入
+  // 每条子需求自己的详情页，用与主需求相同的"停留到字段渲染稳定"方式抓取——
+  // 页签表格里的行内值只作为进不去详情页时的兜底
+  fields.subStories = await extractSubStories(page);
+  if (fields.subStories && fields.subStories.length > 0) {
+    await dumpDebug(page, "substories-tab");
+    for (const sub of fields.subStories) {
+      if (!sub.tapdUrl) continue;
+      try {
+        await clickToNavigate(page, sub.tapdUrl);
+        // 子需求详情页单条最多等3分钟（子需求可能有多条，不能每条都按10分钟预算）
+        const detail = await extractStoryDetailFields(page, 180000);
+        // 详情页抓到的值优先；没抓到的字段保留页签行内的兜底值
+        if (detail.tapdStatus) sub.tapdStatus = detail.tapdStatus;
+        if (detail.estimatedHours !== null) sub.estimatedHours = detail.estimatedHours;
+        if (detail.actualHours !== null) sub.actualHours = detail.actualHours;
+        if (detail.developer.length) sub.developer = detail.developer;
+        if (detail.tester.length) sub.tester = detail.tester;
+        if (detail.currentHandler) sub.currentHandler = detail.currentHandler;
+        if (detail.iterationName) sub.iterationName = detail.iterationName;
+        await dumpDebug(page, "substory-extracted");
+      } catch (e) {
+        // 单条子需求抓取失败不影响其他子需求与主字段，保留行内兜底值
+        console.warn(`[tapd] 子需求详情抓取失败（${sub.tapdUrl}）：`, (e as Error).message);
+      }
+    }
+  }
+
+  return fields;
 }
 
 // 自包含的浏览器抓取入口：每次调用自己起浏览器、复用已保存的登录态、抓完关闭。

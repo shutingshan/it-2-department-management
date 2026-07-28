@@ -159,8 +159,14 @@ function TapdLinkCell({ ticket, onSynced }: { ticket: Ticket; onSynced: () => vo
       // 每一步最长都可能等到10分钟，叠加起来最坏情况能有小一个小时；用全局默认的15秒
       // 超时的话，前端会在后端还在正常跑的时候就先放弃，用户看不到反馈、误以为没反应而
       // 重复点击其他工单，导致后台越攒越多同时在跑的浏览器窗口
-      await api.post(`/sync/tapd/${ticket.id}`, { actor: user.name }, { timeout: 3600000 });
-      message.success(`工单 ${ticket.code} 的TAPD信息已同步`);
+      const res = await api.post(`/sync/tapd/${ticket.id}`, { actor: user.name }, { timeout: 3600000 });
+      const missing: string[] = res.data?.missingFields ?? [];
+      if (missing.length) {
+        // 同步流程执行成功，但部分字段没抓到——如实说清楚，避免误以为所有字段都更新了
+        message.warning(`工单 ${ticket.code} 已同步，但未获取到：${missing.join("、")}`, 6);
+      } else {
+        message.success(`工单 ${ticket.code} 的TAPD信息已同步`);
+      }
       onSynced();
     } catch (e: any) {
       message.error(e?.response?.data?.message ?? "同步TAPD信息失败");

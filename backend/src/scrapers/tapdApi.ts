@@ -18,12 +18,35 @@
  */
 import { config } from "../config";
 
+// 子需求（父需求下的子 story）字段，展示在工单的"子需求"弹窗里
+export interface TapdSubStoryFields {
+  storyId: string;
+  title: string;
+  tapdUrl: string | null;
+  tapdStatus: string | null;
+  developer: string[];
+  tester: string[];
+  currentHandler: string | null;
+  estimatedHours: number | null;
+  actualHours: number | null;
+  iterationName: string | null;
+}
+
 export interface TapdStoryFields {
   tapdStatus: string | null;
   estimatedHours: number | null;
   actualHours: number | null;
   developer: string[];
+  tester: string[];
   currentHandler: string | null;
+  // 迭代：API 模式能拿到名称与起止日期；浏览器模式只能拿到页面上显示的名称
+  iterationName: string | null;
+  iterationStart: string | null;
+  iterationEnd: string | null;
+  // 月度计划：TAPD 上一般是自定义字段，各空间字段名不同；取不到时为空数组（保持工单原值不动）
+  monthlyPlan: string[];
+  // 子需求列表；null 表示本次没有尝试/没能获取子需求（保持工单原值不动），空数组表示确认没有子需求
+  subStories: TapdSubStoryFields[] | null;
 }
 
 // 工单里存的"关联TAPD"地址实测有多种格式，都能拿到空间id与需求id：
@@ -101,6 +124,46 @@ function parseNameList(v: unknown): string[] {
   );
 }
 
+// 迭代信息按 (空间id, 迭代id) 缓存，同一批工单往往同属少数几个迭代
+const iterationCache = new Map<string, { name: string; start: string | null; end: string | null } | null>();
+
+async function getIteration(
+  workspaceId: string,
+  iterationId: string
+): Promise<{ name: string; start: string | null; end: string | null } | null> {
+  const key = `${workspaceId}:${iterationId}`;
+  if (iterationCache.has(key)) return iterationCache.get(key) ?? null;
+  const data = await apiGet("/iterations", { workspace_id: workspaceId, id: iterationId }).catch(() => null);
+  const raw = Array.isArray(data) ? data[0] : data;
+  const iteration = raw?.Iteration ?? raw;
+  const result = iteration?.name
+    ? {
+        name: String(iteration.name),
+        start: iteration.startdate ? String(iteration.startdate) : null,
+        end: iteration.enddate ? String(iteration.enddate) : null,
+      }
+    : null;
+  iterationCache.set(key, result);
+  return result;
+}
+
+// story 原始对象 -> 子需求字段（子需求与父需求同为 story，字段口径一致）
+function toSubStoryFields(story: any, workspaceId: string, statusMap: Record<string, string>): TapdSubStoryFields {
+  const rawStatus = story.status ? String(story.status) : "";
+  return {
+    storyId: String(story.id ?? ""),
+    title: String(story.name ?? ""),
+    tapdUrl: story.id ? `https://www.tapd.cn/tapd_fe/${workspaceId}/story/detail/${story.id}` : null,
+    tapdStatus: rawStatus ? statusMap[rawStatus] ?? rawStatus : null,
+    developer: parseNameList(story.developer),
+    tester: parseNameList(story.tester),
+    currentHandler: parseNameList(story.owner)[0] ?? null,
+    estimatedHours: parseHours(story.effort),
+    actualHours: parseHours(story.effort_completed),
+    iterationName: null, // 子需求的迭代名需要额外按 iteration_id 查询，由调用处统一补齐
+  };
+}
+
 export async function fetchTapdStoryFields(tapdUrl: string): Promise<TapdStoryFields> {
   const ref = parseTapdRef(tapdUrl);
   if (!ref) {
@@ -120,11 +183,48 @@ export async function fetchTapdStoryFields(tapdUrl: string): Promise<TapdStoryFi
   // 映射表里查不到就直接用原始值，至少不会丢数据
   const tapdStatus = rawStatus ? statusMap[rawStatus] ?? rawStatus : null;
 
+  // 迭代：story 上只有 iteration_id，名称/起止日期要再查一次迭代接口
+  const iteration =
+    story.iteration_id && String(story.iteration_id) !== "0"
+      ? await getIteration(ref.workspaceId, String(story.iteration_id))
+      : null;
+
+  // 子需求：同一空间下 parent_id 等于本需求 id 的 story 即为子需求。
+  // 查询失败时置为 null（保持工单原有子需求数据不动），查询成功但为空数组则表示确认没有子需求
+  let subStories: TapdSubStoryFields[] | null = null;
+  try {
+    const childData = await apiGet("/stories", {
+      workspace_id: ref.workspaceId,
+      parent_id: ref.storyId,
+      limit: "100",
+    });
+    const list = Array.isArray(childData) ? childData : childData ? [childData] : [];
+    subStories = [];
+    for (const item of list) {
+      const child = item?.Story ?? item;
+      if (!child || typeof child !== "object" || !child.id) continue;
+      const sub = toSubStoryFields(child, ref.workspaceId, statusMap);
+      if (child.iteration_id && String(child.iteration_id) !== "0") {
+        sub.iterationName = (await getIteration(ref.workspaceId, String(child.iteration_id)))?.name ?? null;
+      }
+      subStories.push(sub);
+    }
+  } catch {
+    subStories = null;
+  }
+
   return {
     tapdStatus,
     estimatedHours: parseHours(story.effort),
     actualHours: parseHours(story.effort_completed),
     developer: parseNameList(story.developer),
+    tester: parseNameList(story.tester),
     currentHandler: parseNameList(story.owner)[0] ?? null,
+    iterationName: iteration?.name ?? null,
+    iterationStart: iteration?.start ?? null,
+    iterationEnd: iteration?.end ?? null,
+    // 月度计划在TAPD上一般是各空间自定义字段，字段名不统一，API模式暂不取；保持工单原值
+    monthlyPlan: [],
+    subStories,
   };
 }

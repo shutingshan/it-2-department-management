@@ -1,7 +1,7 @@
 import { Router } from "express";
 import dayjs from "dayjs";
 import { store } from "../store";
-import { resolveStage } from "../mapping";
+import { dedupe, resolveStage, stripCurrentIterationTag } from "../mapping";
 import { fetchTapdDelta } from "../adapters/tapd";
 import { SyncJob } from "../store";
 import { ScrapedRow, scrapeDangquyunTicketList } from "../scrapers/dangquyunScraper";
@@ -299,13 +299,48 @@ router.post("/terminate", (req, res) => {
 });
 
 // 把抓到的TAPD字段应用到工单上并按需重新计算工单阶段；批量任务和单条同步共用同一份逻辑，
-// 避免两处各写一套导致字段口径不一致
+// 避免两处各写一套导致字段口径不一致。各字段"取不到就保持工单原值不动"，不会用空值覆盖
 function applyTapdFields(ticket: Ticket, fields: TapdStoryFields) {
   if (fields.tapdStatus) ticket.devStatus = fields.tapdStatus;
   if (fields.estimatedHours !== null) ticket.estimatedHours = fields.estimatedHours;
   if (fields.actualHours !== null) ticket.actualHours = fields.actualHours;
   if (fields.developer.length) ticket.developer = fields.developer;
   if (fields.currentHandler) ticket.currentHandler = fields.currentHandler;
+
+  // 迭代：按名称去重合并进已有列表（历史迭代保留），当前迭代不存在时追加
+  if (fields.iterationName) {
+    const name = fields.iterationName;
+    const exists = ticket.iterations.some(
+      (i) => stripCurrentIterationTag(i.name) === stripCurrentIterationTag(name)
+    );
+    if (!exists) {
+      ticket.iterations.push({ name, start: fields.iterationStart ?? "", end: fields.iterationEnd ?? "" });
+    }
+  }
+
+  // 月度计划：去重合并
+  if (fields.monthlyPlan.length) {
+    ticket.monthlyPlan = dedupe([...ticket.monthlyPlan, ...fields.monthlyPlan]);
+  }
+
+  // 子需求：null 表示本次没能获取（保持原值），空数组表示确认没有子需求
+  if (fields.subStories !== null) {
+    ticket.subTickets = fields.subStories.map((s) => ({
+      id: s.storyId,
+      code: s.storyId,
+      tapdUrl: s.tapdUrl,
+      title: s.title,
+      productManager: "",
+      developer: s.developer.join("、"),
+      tester: s.tester.join("、"),
+      currentHandler: s.currentHandler ?? "",
+      tapdStatus: s.tapdStatus,
+      monthlyPlan: [],
+      iteration: s.iterationName ? { name: s.iterationName, start: "", end: "" } : null,
+      estimatedHours: s.estimatedHours ?? 0,
+      actualHours: s.actualHours ?? 0,
+    }));
+  }
 
   const newStage = resolveStage(ticket.status, ticket.devStatus, ticket.iterations);
   if (newStage !== ticket.stage) {
@@ -328,7 +363,7 @@ const ticketsSyncingTapd = new Set<string>();
 // 点击工单列表 TAPD 列地址时触发：只同步这一条工单，不占用批量任务的进度弹窗/store.currentJob。
 // 无独立并发锁保护批量任务本身（批量任务见 startTapdJob），但会跟批量任务共享同一份"正在同步"标记，
 // 防止同一条工单被两边同时处理
-export async function syncSingleTicketTapd(ticket: Ticket, actor: string): Promise<void> {
+export async function syncSingleTicketTapd(ticket: Ticket, actor: string): Promise<TapdStoryFields> {
   if (!ticket.tapdUrl) {
     throw new Error("该工单未关联TAPD地址");
   }
@@ -349,6 +384,7 @@ export async function syncSingleTicketTapd(ticket: Ticket, actor: string): Promi
       failReason: null,
       detail: `单条同步TAPD：工单 ${ticket.code}`,
     });
+    return fields;
   } catch (e) {
     const reason = (e as Error).message ?? "TAPD 同步失败";
     ticket.tapdErrorNote = { time: time(), message: reason };
@@ -371,8 +407,19 @@ router.post("/tapd/:id", async (req, res) => {
   if (!ticket) return res.status(404).json({ message: "工单不存在" });
   const { actor } = req.body as { actor?: string };
   try {
-    await syncSingleTicketTapd(ticket, actor ?? "未知");
-    res.json({ data: ticket });
+    const fields = await syncSingleTicketTapd(ticket, actor ?? "未知");
+    // 明确报告哪些字段这次没有获取到，避免"提示成功但实际字段是空的"造成误解
+    const missingFields: string[] = [];
+    if (!fields.tapdStatus) missingFields.push("TAPD状态");
+    if (fields.estimatedHours === null) missingFields.push("预估工时");
+    if (fields.actualHours === null) missingFields.push("完成工时");
+    if (!fields.developer.length) missingFields.push("开发人员");
+    if (!fields.tester.length) missingFields.push("测试人员");
+    if (!fields.currentHandler) missingFields.push("处理人");
+    if (!fields.iterationName) missingFields.push("迭代");
+    if (!fields.monthlyPlan.length) missingFields.push("月度计划");
+    if (fields.subStories === null) missingFields.push("子需求列表");
+    res.json({ data: ticket, missingFields });
   } catch (e) {
     res.status(500).json({ message: (e as Error).message ?? "同步TAPD信息失败" });
   }
