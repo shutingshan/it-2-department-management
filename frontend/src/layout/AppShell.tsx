@@ -146,8 +146,10 @@ function SwitchTargetButton() {
   const [open, setOpen] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
 
+  // 取真实工单数据里出现过的 IT 受理人（后端已去重排序），而不是预置的部门人员目录——
+  // 目录里有的人可能一条工单都没有，工单里的受理人也可能不在目录里
   async function loadUsers() {
-    const res = await api.get("/auth/users", { params: { role: "it_handler" } });
+    const res = await api.get("/tickets/it-handlers");
     setUsers(res.data.data);
   }
 

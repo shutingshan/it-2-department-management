@@ -13,6 +13,18 @@ router.get("/card-stats", (req, res) => {
   res.json({ data: computeCardStats(store.tickets) });
 });
 
+// 真实工单数据里出现过的 IT 受理人（去重排序），供"切换人员"等入口使用。
+// 不用人员目录（store.users）是因为那份是预置的部门人员名单，跟真实工单里实际出现的
+// 受理人不一定对得上：目录里有的人可能一条工单都没有，工单里的人也可能不在目录里
+router.get("/it-handlers", (_req, res) => {
+  const names = dedupe(store.tickets.map((t) => t.itHandler)).sort();
+  const data = names.map((name) => {
+    const matched = store.users.find((u) => u.name === name);
+    return { id: matched?.id ?? name, name, avatarColor: matched?.avatarColor ?? "#999999" };
+  });
+  res.json({ data });
+});
+
 router.get("/", (req, res) => {
   const q = parseQuery(req.query as Record<string, unknown>);
   const { actor, actorRole } = req.query as { actor?: string; actorRole?: string };
