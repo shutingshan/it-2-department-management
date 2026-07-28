@@ -1,13 +1,14 @@
 /**
- * TAPD 需求详情页字段抓取。
+ * TAPD 需求详情页字段抓取（浏览器模式，TAPD_FETCH_MODE=browser 时启用）。
  *
- * 选择器为通用策略实现（按字段中文标签查找相邻的值），未经真实 tapd.cn 页面结构验证——
- * 跟当曲云抓取器一样，第一次真实跑起来大概率需要根据实际页面 HTML 调整。跑的时候把
- * TAPD_DEBUG=true 打开，失败截图/HTML 会存到 backend/.auth/debug/，发回来我再调整。
+ * 主需求右侧字段面板的选择器已按真实页面 HTML 校准过（.entity-detail-right-col 结构），
+ * 覆盖：TAPD状态、预估工时、完成工时、开发人员、测试人员、处理人、迭代、月度计划。
  *
- * 迭代、月度计划、子需求列表暂未接入真实抓取（迭代需要可靠的起止日期、子需求列表结构
- * 差异较大，贸然猜测容易产出错误数据），先只处理字段值相对简单直接的部分：
- * TAPD状态、预估工时、完成工时、开发人员、处理人。
+ * 子需求：字段值不在"子需求"页签的列表里，必须逐个点进子需求自己的详情页才能拿全，
+ * 因此按 列出入口 -> 逐条进详情页抓取 -> 回到父需求页签 的方式处理。
+ * 子需求页签本身的 DOM 结构尚未拿到真实样本，选择器仍是通用猜测；跑的时候把
+ * TAPD_DEBUG=true 打开，现场截图/HTML 会存到 backend/.auth/debug/（含 substories-tab），
+ * 发回来即可针对性校准。
  */
 import fs from "fs";
 import path from "path";
@@ -288,77 +289,92 @@ async function extractFieldsOnce(page: Page): Promise<TapdStoryFields | null> {
     iterationStart: null,
     iterationEnd: null,
     monthlyPlan,
-    subStories: null, // 子需求列表由 extractSubStories 单独尝试补齐
+    subStories: null, // 子需求列表由 listSubStoryEntries + 逐条进详情页补齐
     emptyFields,
   };
 }
 
-// 尝试切到"子需求"页签并抓取子需求列表。整个过程是尽力而为：
-// 页签不存在（该需求没有子需求）、表格结构认不出来等情况一律返回 null，
-// 不影响主字段的同步结果（工单原有的子需求数据保持不动）
-async function extractSubStories(page: Page): Promise<TapdSubStoryFields[] | null> {
+interface SubStoryEntry {
+  storyId: string;
+  title: string;
+  url: string | null;
+  index: number;
+  // 子需求页签表格里能直接读到的字段（实测该表格含 ID/预估工时/完成工时/标题/迭代/处理人 等列），
+  // 作为进详情页前的打底值；进详情页后抓到的同名字段会覆盖它
+  row: Record<string, string>;
+}
+
+// 切到"子需求"页签，列出每条子需求的入口。
+// 返回 null 表示"没能确认子需求情况"（保持工单原值不动），空数组表示"确认没有子需求"
+async function listSubStoryEntries(page: Page, workspaceId: string | null): Promise<SubStoryEntry[] | null> {
   try {
-    // 详情页页签栏里"子需求"是 li#SubStories，后面 <label> 里带着数量，如 (0) / (3)
+    // 详情页页签栏里"子需求"是 li#SubStories，后面 <label> 里带着数量，如 (0) / (2)
     const tab = page.locator("li#SubStories");
     if ((await tab.count()) === 0) return null;
 
-    // 数量为 0 时不用点进去了，直接判定"确认没有子需求"（返回空数组而非 null，
-    // 这样上层会把工单的子需求清空，而不是保留过时数据）
+    // 数量为 0 时不用点进去，直接判定"确认没有子需求"（返回空数组而非 null，
+    // 这样上层会把工单里过时的子需求清空）
     const countText = (await tab.locator("label").first().textContent().catch(() => "")) ?? "";
     if (/\(\s*0\s*\)/.test(countText)) return [];
 
     await tab.click({ timeout: 10000 });
     await page.waitForTimeout(5000);
     await scrollAllToBottom(page);
+    // 子需求页签结构尚未按真实HTML校准过，把现场存下来便于后续调整选择器
+    await dumpDebug(page, "substories-tab");
 
-    // 子需求列表一般渲染成表格：表头含"标题"，行内是各子需求的字段
-    for (const target of [page, ...page.frames()] as Locatable[]) {
-      const rows = await target
-        .evaluate(() => {
-          const tables = Array.from(document.querySelectorAll("table"));
-          for (const table of tables) {
-            const headers = Array.from(table.querySelectorAll("thead th, thead td")).map((th) =>
-              (th.textContent ?? "").trim()
-            );
-            if (!headers.some((h) => h.includes("标题") || h.includes("名称"))) continue;
-            return Array.from(table.querySelectorAll("tbody tr")).map((tr) => {
-              const cells = Array.from(tr.querySelectorAll("td"));
-              const row: Record<string, string> = {};
-              headers.forEach((h, i) => {
-                if (h) row[h] = (cells[i]?.textContent ?? "").trim();
-              });
-              // 标题列里如果有链接，一并带出链接地址（用于子需求的TAPD地址）
-              const link = tr.querySelector("a[href*='story']") as HTMLAnchorElement | null;
-              if (link?.href) row.__href = link.href;
-              return row;
+    const rows = await page
+      .evaluate(() => {
+        // 子需求列表是一张带表头的表格，第一列就是子需求的 ID（如 1096555）。
+        // 优先按表格读：这样既拿到 ID（可据此拼出详情地址，比找 <a href> 稳），
+        // 又能顺带把表格里已有的字段先读下来
+        const tables = Array.from(document.querySelectorAll("table"));
+        for (const table of tables) {
+          const headers = Array.from(table.querySelectorAll("thead th, thead td")).map((th) =>
+            (th.textContent ?? "").trim()
+          );
+          if (!headers.some((h) => h.includes("ID") || h.includes("标题"))) continue;
+          const trs = Array.from(table.querySelectorAll("tbody tr"));
+          const out = trs.map((tr) => {
+            const cells = Array.from(tr.querySelectorAll("td")).map((td) => (td.textContent ?? "").trim());
+            const row: Record<string, string> = {};
+            headers.forEach((h, i) => {
+              if (h) row[h] = cells[i] ?? "";
             });
-          }
-          return null;
-        })
-        .catch(() => null);
+            // 行内任意一个指向需求详情的链接（有就用，没有就靠 ID 拼地址）
+            const link = tr.querySelector<HTMLAnchorElement>(
+              'a[href*="/story/detail/"], a[href*="/stories/view/"]'
+            );
+            // ID 优先取"ID"列，取不到就从所有单元格里找一串足够长的纯数字
+            const idFromColumn = Object.entries(row).find(([k]) => k.includes("ID"))?.[1] ?? "";
+            const id = /^\d{6,}$/.test(idFromColumn)
+              ? idFromColumn
+              : cells.find((c) => /^\d{6,}$/.test(c)) ?? "";
+            return { row, href: link?.href ?? "", id };
+          });
+          if (out.length > 0) return out;
+        }
+        return [];
+      })
+      .catch(() => [] as { row: Record<string, string>; href: string; id: string }[]);
 
-      if (rows && rows.length > 0) {
-        const pick = (row: Record<string, string>, ...keys: string[]) => {
-          for (const k of Object.keys(row)) {
-            if (keys.some((key) => k.includes(key))) return row[k];
-          }
-          return "";
-        };
-        return rows.map((row, idx) => ({
-          storyId: row.__href?.match(/(\d+)(?:[/?#].*)?$/)?.[1] ?? String(idx + 1),
-          title: pick(row, "标题", "名称"),
-          tapdUrl: row.__href ?? null,
-          tapdStatus: pick(row, "状态") || null,
-          developer: parseNameList(pick(row, "开发人员")),
-          tester: parseNameList(pick(row, "测试人员")),
-          currentHandler: pick(row, "处理人") || null,
-          estimatedHours: parseHours(pick(row, "预估工时")),
-          actualHours: parseHours(pick(row, "完成工时", "消耗工时")),
-          iterationName: pick(row, "迭代") || null,
-        }));
+    if (rows.length === 0) return null;
+
+    const pick = (row: Record<string, string>, ...keys: string[]) => {
+      for (const k of Object.keys(row)) {
+        if (keys.some((key) => k.includes(key))) return row[k];
       }
-    }
-    return null;
+      return "";
+    };
+
+    return rows.map((r, index) => ({
+      storyId: r.id,
+      title: pick(r.row, "标题", "名称"),
+      // 有现成链接就用；否则用 ID 拼详情地址（同一空间下的标准详情地址格式）
+      url: r.href || (r.id && workspaceId ? `https://www.tapd.cn/tapd_fe/${workspaceId}/story/detail/${r.id}` : null),
+      index,
+      row: r.row,
+    }));
   } catch {
     return null;
   }
@@ -440,19 +456,55 @@ export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promis
   const fields = await extractStoryDetailFields(page, 600000);
   await dumpDebug(page, "extracted");
 
-  // 子需求：先切"子需求"页签拿到列表（标题/链接与行内字段），再逐条真实点击进入
-  // 每条子需求自己的详情页，用与主需求相同的"停留到字段渲染稳定"方式抓取——
-  // 页签表格里的行内值只作为进不去详情页时的兜底
-  fields.subStories = await extractSubStories(page);
-  if (fields.subStories && fields.subStories.length > 0) {
-    await dumpDebug(page, "substories-tab");
-    for (const sub of fields.subStories) {
-      if (!sub.tapdUrl) continue;
+  // 子需求：字段值不在页签列表里，必须逐个点进子需求自己的详情页才能拿全。
+  // 先在页签里列出每条子需求的入口，再挨个进去，用与主需求完全相同的
+  //"停留到字段渲染稳定"方式抓取；每处理完一条都回到父需求的子需求页签，再处理下一条
+  const workspaceId = tapdUrl.match(/tapd\.cn\/(?:tapd_fe\/)?(\d+)\//)?.[1] ?? null;
+  const entries = await listSubStoryEntries(page, workspaceId);
+  if (entries === null) {
+    fields.subStories = null; // 没能确认子需求情况，保持工单原有子需求数据不动
+  } else if (entries.length === 0) {
+    fields.subStories = []; // 确认没有子需求
+  } else {
+    const pickRow = (row: Record<string, string>, ...keys: string[]) => {
+      for (const k of Object.keys(row)) {
+        if (keys.some((key) => k.includes(key))) return row[k];
+      }
+      return "";
+    };
+
+    const subStories: TapdSubStoryFields[] = [];
+    for (const entry of entries) {
+      // 先用页签表格里读到的值打底（表格已含 预估工时/完成工时/迭代/处理人 等列），
+      // 这样即便某条子需求详情页进不去，也不至于整条为空
+      const sub: TapdSubStoryFields = {
+        storyId: entry.storyId || String(entry.index + 1),
+        title: entry.title,
+        tapdUrl: entry.url,
+        tapdStatus: pickRow(entry.row, "状态") || null,
+        developer: parseNameList(pickRow(entry.row, "开发人员")),
+        tester: parseNameList(pickRow(entry.row, "测试人员")),
+        currentHandler: parseNameList(pickRow(entry.row, "处理人"))[0] ?? null,
+        estimatedHours: parseHours(pickRow(entry.row, "预估工时")),
+        actualHours: parseHours(pickRow(entry.row, "完成工时", "消耗工时")),
+        iterationName: pickRow(entry.row, "迭代") || null,
+      };
+
+      // 再点进这条子需求自己的详情页，把表格里没有的字段（开发人员/测试人员等）补齐
       try {
-        await clickToNavigate(page, sub.tapdUrl);
-        // 子需求详情页单条最多等3分钟（子需求可能有多条，不能每条都按10分钟预算）
+        if (entry.url) {
+          await clickToNavigate(page, entry.url);
+        } else {
+          // 没有可用地址，只能按行序号真实点击进去
+          await page.locator("table tbody tr").nth(entry.index).click({ timeout: 10000 });
+          await page.waitForTimeout(3000);
+        }
+
+        // 单条子需求最多等3分钟（一条需求下可能挂着好几个子需求，不能每条都按10分钟预算）
         const detail = await extractStoryDetailFields(page, 180000);
-        // 详情页抓到的值优先；没抓到的字段保留页签行内的兜底值
+        await dumpDebug(page, "substory-extracted");
+
+        // 详情页的值优先，取不到的保留表格打底值
         if (detail.tapdStatus) sub.tapdStatus = detail.tapdStatus;
         if (detail.estimatedHours !== null) sub.estimatedHours = detail.estimatedHours;
         if (detail.actualHours !== null) sub.actualHours = detail.actualHours;
@@ -460,12 +512,26 @@ export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promis
         if (detail.tester.length) sub.tester = detail.tester;
         if (detail.currentHandler) sub.currentHandler = detail.currentHandler;
         if (detail.iterationName) sub.iterationName = detail.iterationName;
-        await dumpDebug(page, "substory-extracted");
+        sub.tapdUrl = page.url();
       } catch (e) {
-        // 单条子需求抓取失败不影响其他子需求与主字段，保留行内兜底值
-        console.warn(`[tapd] 子需求详情抓取失败（${sub.tapdUrl}）：`, (e as Error).message);
+        // 单条子需求进详情失败不影响其余子需求与主需求字段，保留表格打底值
+        console.warn(`[tapd] 子需求详情抓取失败（第${entry.index + 1}条）：`, (e as Error).message);
+      }
+
+      subStories.push(sub);
+
+      // 回到父需求详情页并重新打开子需求页签，供下一条使用
+      // （最后一条处理完也回去，让浏览器停在父需求上，便于人工核对）
+      try {
+        await clickToNavigate(page, tapdUrl);
+        await page.locator("li#SubStories").click({ timeout: 10000 });
+        await page.waitForTimeout(3000);
+      } catch {
+        // 回不去就没法继续处理后面的子需求了，跳出，已抓到的先留下
+        break;
       }
     }
+    fields.subStories = subStories;
   }
 
   return fields;
