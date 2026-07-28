@@ -183,6 +183,78 @@ async function scrollAllToBottom(page: Page) {
   await page.waitForTimeout(1200);
 }
 
+// 在页面上查找"子需求"页签里那张带 ID/标题表头的表格，返回当前已渲染出的行数；
+// 找不到表格时返回 0（与 listSubStoryEntries 里读取表格用的是同一套表头识别逻辑，保持一致）
+async function countSubStoryRows(page: Page): Promise<number> {
+  return page
+    .evaluate(() => {
+      const tables = Array.from(document.querySelectorAll("table"));
+      for (const table of tables) {
+        const headers = Array.from(table.querySelectorAll("thead th, thead td")).map((th) =>
+          (th.textContent ?? "").trim()
+        );
+        if (!headers.some((h) => h.includes("ID") || h.includes("标题"))) continue;
+        return table.querySelectorAll("tbody tr").length;
+      }
+      return 0;
+    })
+    .catch(() => 0);
+}
+
+// "子需求"页签固定在详情页顶部（跟左侧主内容同一栏，页签栏就在标题下方）；抓主字段时
+// scrollAllToBottom 已经把整个页面滚到了底部，切到这个页签后如果不滚回顶部，页签内容会停留
+// 在当前可视区域上方看不到——不仅人眼看不到，很多懒加载表格本身就是靠"进入可视区域"才触发
+// 渲染更多行的，页面停在底部会导致它误判"表格不在视口内"而不再加载，必须先滚回顶部
+async function scrollToPageTop(page: Page) {
+  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+  await page.waitForTimeout(300);
+}
+
+// 子需求列表跟当曲云工单列表同样可能是懒加载/虚拟滚动表格：一次滚动只能触发加载视口附近的
+// 那一部分行，必须反复"滚到底部再数一次行数"，直到行数连续几轮都不再增长，才能保证表格里
+// 已经渲染出全部子需求。这里只滚动表格自己的内部滚动容器，不整体滚动页面——
+// 整体滚动会把刚滚回顶部、已经进入可视区域的表格重新挤出视口，跟上面的"先滚回顶部"互相打架
+async function scrollSubStoryTableToLoadAll(page: Page, timeoutMs = 20000): Promise<number> {
+  const scrollTableContainerOnce = () =>
+    page
+      .evaluate(() => {
+        const tables = Array.from(document.querySelectorAll("table"));
+        for (const table of tables) {
+          const headers = Array.from(table.querySelectorAll("thead th, thead td")).map((th) =>
+            (th.textContent ?? "").trim()
+          );
+          if (!headers.some((h) => h.includes("ID") || h.includes("标题"))) continue;
+          let el: HTMLElement | null = table as HTMLElement;
+          while (el && el !== document.body) {
+            const style = getComputedStyle(el);
+            if ((style.overflowY === "auto" || style.overflowY === "scroll") && el.scrollHeight > el.clientHeight + 10) {
+              el.scrollTop = el.scrollHeight;
+              return;
+            }
+            el = el.parentElement;
+          }
+          return;
+        }
+      })
+      .catch(() => {});
+
+  const deadline = Date.now() + timeoutMs;
+  let lastCount = await countSubStoryRows(page);
+  let stableRounds = 0;
+  while (Date.now() < deadline && stableRounds < 3) {
+    await scrollTableContainerOnce();
+    await page.waitForTimeout(500);
+    const count = await countSubStoryRows(page);
+    if (count === lastCount) {
+      stableRounds += 1;
+    } else {
+      stableRounds = 0;
+      lastCount = count;
+    }
+  }
+  return lastCount;
+}
+
 // 按 TAPD 详情页真实结构读取右侧字段面板：每个字段是一个 .entity-detail-right-col 块，
 // 里面 __key 是中文标签、__value 里的 span 上有 title 属性存着显示值（空值时为 "-"）。
 // 按中文标签取值而不是写死 field 名，是因为"测试人员/月度计划"这类是各空间自定义字段
@@ -319,7 +391,10 @@ async function listSubStoryEntries(page: Page, workspaceId: string | null): Prom
 
     await tab.click({ timeout: 10000 });
     await page.waitForTimeout(5000);
-    await scrollAllToBottom(page);
+    // 子需求页签在页面上方，抓主字段时页面已被滚到底部，这里先滚回顶部让页签内容重新可见，
+    // 再反复滚动表格自身的容器直到行数连续几轮不再增长，避免懒加载/虚拟滚动导致漏行
+    await scrollToPageTop(page);
+    await scrollSubStoryTableToLoadAll(page);
     // 子需求页签结构尚未按真实HTML校准过，把现场存下来便于后续调整选择器
     await dumpDebug(page, "substories-tab");
 
