@@ -199,7 +199,9 @@ async function readRightPanel(page: Page): Promise<Record<string, string>> {
         // 没有 title 就退回文本内容
         const span = valueEl.querySelector("span[title]");
         const raw = (span?.getAttribute("title") ?? valueEl.textContent ?? "").trim();
-        if (raw && raw !== "-") map[label] = raw;
+        // "-" 是 TAPD 表示"该字段没填"的占位符，这里统一归一成空字符串保留下来——
+        // 键存在但值为空，代表"页面上确实是空的"，跟"页面上压根没找到这个字段"要区分开
+        map[label] = raw === "-" ? "" : raw;
       }
       return map;
     })
@@ -227,29 +229,42 @@ async function extractFieldsOnce(page: Page): Promise<TapdStoryFields | null> {
   const panel = await readRightPanel(page);
   const targets: Locatable[] = [page, ...page.frames()];
 
-  // 优先用上面按真实结构读到的值；读不到再退回早期那套"按标签找相邻节点"的通用兜底策略
-  async function findLabel(...labels: string[]): Promise<string | null> {
-    for (const label of labels) {
-      if (panel[label]) return panel[label];
+  // TAPD 上确认为空（页面显示"-"）的字段，交给上层用于清空工单里的对应值
+  const emptyFields: string[] = [];
+
+  // 优先用上面按真实结构读到的值；读不到再退回早期那套"按标签找相邻节点"的通用兜底策略。
+  // fieldName 既是记入 emptyFields 用的字段名（跟工单字段表口径一致），
+  // 也是页面上默认要找的标签文字；标签文字跟字段名不一致时用 labels 覆盖
+  async function findLabel(fieldName: string, ...labels: string[]): Promise<string | null> {
+    const keys = labels.length ? labels : [fieldName];
+    for (const key of keys) {
+      if (panel[key]) return panel[key];
     }
-    for (const label of labels) {
+    // 结构化面板里有这个标签但值是空的 -> TAPD上确实没填
+    if (keys.some((k) => k in panel)) {
+      emptyFields.push(fieldName);
+      return null;
+    }
+    for (const key of keys) {
       for (const target of targets) {
-        const v = await getFieldValueByLabel(target, label);
+        const v = await getFieldValueByLabel(target, key);
         if (v && v !== "-") return v;
       }
     }
     return null;
   }
 
-  const tapdStatus = (await readStatus(page)) ?? (await findLabel("状态"));
+  const tapdStatus = (await readStatus(page)) ?? (await findLabel("TAPD状态", "状态"));
   const estimatedHours = parseHours(await findLabel("预估工时"));
-  const actualHours = parseHours(await findLabel("完成工时", "消耗工时"));
+  const actualHours = parseHours(await findLabel("完成工时", "完成工时", "消耗工时"));
   const developer = parseNameList(await findLabel("开发人员"));
   const tester = parseNameList(await findLabel("测试人员"));
-  const currentHandler = parseNameList(await findLabel("处理人", "当前处理人"))[0] ?? null;
+  const currentHandler = parseNameList(await findLabel("处理人", "处理人", "当前处理人"))[0] ?? null;
   const iterationName = await findLabel("迭代");
   const monthlyPlan = parseNameList(await findLabel("月度计划"));
 
+  // 页面确实渲染出字段面板了就算抓到（哪怕字段值全是"-"，那也是有效结果，
+  // 说明这条需求在TAPD上就是没填），不能因为"值都是空的"就当成还没加载完继续空等
   const gotAnything =
     tapdStatus ||
     estimatedHours !== null ||
@@ -258,7 +273,8 @@ async function extractFieldsOnce(page: Page): Promise<TapdStoryFields | null> {
     tester.length ||
     currentHandler ||
     iterationName ||
-    monthlyPlan.length;
+    monthlyPlan.length ||
+    emptyFields.length;
   if (!gotAnything) return null;
   return {
     tapdStatus,
@@ -273,6 +289,7 @@ async function extractFieldsOnce(page: Page): Promise<TapdStoryFields | null> {
     iterationEnd: null,
     monthlyPlan,
     subStories: null, // 子需求列表由 extractSubStories 单独尝试补齐
+    emptyFields,
   };
 }
 

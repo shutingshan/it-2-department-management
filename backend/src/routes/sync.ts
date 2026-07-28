@@ -301,13 +301,27 @@ router.post("/terminate", (req, res) => {
 // 把抓到的TAPD字段应用到工单上并按需重新计算工单阶段；批量任务和单条同步共用同一份逻辑，
 // 避免两处各写一套导致字段口径不一致。各字段"取不到就保持工单原值不动"，不会用空值覆盖
 function applyTapdFields(ticket: Ticket, fields: TapdStoryFields) {
-  if (fields.tapdStatus) ticket.devStatus = fields.tapdStatus;
-  if (fields.estimatedHours !== null) ticket.estimatedHours = fields.estimatedHours;
-  if (fields.actualHours !== null) ticket.actualHours = fields.actualHours;
-  if (fields.developer.length) ticket.developer = fields.developer;
-  if (fields.currentHandler) ticket.currentHandler = fields.currentHandler;
+  // TAPD 上确认没填的字段：工单里也要跟着清空，保证两边一致（界面上即显示为"-"）。
+  // 只有"抓取失败没读到"的字段才保持工单原值不动
+  const isEmptyOnTapd = (name: string) => fields.emptyFields.includes(name);
 
-  // 迭代：按名称去重合并进已有列表（历史迭代保留），当前迭代不存在时追加
+  if (fields.tapdStatus) ticket.devStatus = fields.tapdStatus;
+  else if (isEmptyOnTapd("TAPD状态")) ticket.devStatus = null;
+
+  if (fields.estimatedHours !== null) ticket.estimatedHours = fields.estimatedHours;
+  else if (isEmptyOnTapd("预估工时")) ticket.estimatedHours = 0;
+
+  if (fields.actualHours !== null) ticket.actualHours = fields.actualHours;
+  else if (isEmptyOnTapd("完成工时")) ticket.actualHours = 0;
+
+  if (fields.developer.length) ticket.developer = fields.developer;
+  else if (isEmptyOnTapd("开发人员")) ticket.developer = [];
+
+  if (fields.currentHandler) ticket.currentHandler = fields.currentHandler;
+  else if (isEmptyOnTapd("处理人")) ticket.currentHandler = "";
+
+  // 迭代：按名称去重合并进已有列表（历史迭代保留），当前迭代不存在时追加；
+  // TAPD 上确认没有迭代时清空（会连带让工单阶段回落到"待排期"，这是预期行为）
   if (fields.iterationName) {
     const name = fields.iterationName;
     const exists = ticket.iterations.some(
@@ -316,11 +330,15 @@ function applyTapdFields(ticket: Ticket, fields: TapdStoryFields) {
     if (!exists) {
       ticket.iterations.push({ name, start: fields.iterationStart ?? "", end: fields.iterationEnd ?? "" });
     }
+  } else if (isEmptyOnTapd("迭代")) {
+    ticket.iterations = [];
   }
 
   // 月度计划：去重合并
   if (fields.monthlyPlan.length) {
     ticket.monthlyPlan = dedupe([...ticket.monthlyPlan, ...fields.monthlyPlan]);
+  } else if (isEmptyOnTapd("月度计划")) {
+    ticket.monthlyPlan = [];
   }
 
   // 子需求：null 表示本次没能获取（保持原值），空数组表示确认没有子需求
@@ -408,16 +426,20 @@ router.post("/tapd/:id", async (req, res) => {
   const { actor } = req.body as { actor?: string };
   try {
     const fields = await syncSingleTicketTapd(ticket, actor ?? "未知");
-    // 明确报告哪些字段这次没有获取到，避免"提示成功但实际字段是空的"造成误解
+    // 只报告"真正没抓到"的字段：TAPD 上本来就没填（emptyFields）的不算异常，
+    // 那种情况工单里已经跟着清空了，两边是一致的
     const missingFields: string[] = [];
-    if (!fields.tapdStatus) missingFields.push("TAPD状态");
-    if (fields.estimatedHours === null) missingFields.push("预估工时");
-    if (fields.actualHours === null) missingFields.push("完成工时");
-    if (!fields.developer.length) missingFields.push("开发人员");
-    if (!fields.tester.length) missingFields.push("测试人员");
-    if (!fields.currentHandler) missingFields.push("处理人");
-    if (!fields.iterationName) missingFields.push("迭代");
-    if (!fields.monthlyPlan.length) missingFields.push("月度计划");
+    const check = (name: string, got: boolean) => {
+      if (!got && !fields.emptyFields.includes(name)) missingFields.push(name);
+    };
+    check("TAPD状态", !!fields.tapdStatus);
+    check("预估工时", fields.estimatedHours !== null);
+    check("完成工时", fields.actualHours !== null);
+    check("开发人员", fields.developer.length > 0);
+    check("测试人员", fields.tester.length > 0);
+    check("处理人", !!fields.currentHandler);
+    check("迭代", !!fields.iterationName);
+    check("月度计划", fields.monthlyPlan.length > 0);
     if (fields.subStories === null) missingFields.push("子需求列表");
     res.json({ data: ticket, missingFields });
   } catch (e) {

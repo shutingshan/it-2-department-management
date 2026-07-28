@@ -47,6 +47,10 @@ export interface TapdStoryFields {
   monthlyPlan: string[];
   // 子需求列表；null 表示本次没有尝试/没能获取子需求（保持工单原值不动），空数组表示确认没有子需求
   subStories: TapdSubStoryFields[] | null;
+  // 在 TAPD 上确认为空（页面显示"-"或接口返回空值）的字段中文名。
+  // 用来区分"抓取失败没读到"和"TAPD上本来就没填"：前者保持工单原值不动，
+  // 后者要把工单里的值一并清空，保证两边一致
+  emptyFields: string[];
 }
 
 // 工单里存的"关联TAPD"地址实测有多种格式，都能拿到空间id与需求id：
@@ -213,6 +217,18 @@ export async function fetchTapdStoryFields(tapdUrl: string): Promise<TapdStoryFi
     subStories = null;
   }
 
+  // API 一定会把字段带回来，所以"返回了但值为空"就等于TAPD上确实没填，可以放心清空工单里的值。
+  // 月度计划是各空间自定义字段（字段名不统一），API模式不取，因此不参与清空判断
+  const isEmpty = (v: unknown) => v === null || v === undefined || String(v).trim() === "";
+  const emptyFields: string[] = [];
+  if (isEmpty(story.status)) emptyFields.push("TAPD状态");
+  if (isEmpty(story.effort)) emptyFields.push("预估工时");
+  if (isEmpty(story.effort_completed)) emptyFields.push("完成工时");
+  if (isEmpty(story.developer)) emptyFields.push("开发人员");
+  if (isEmpty(story.tester)) emptyFields.push("测试人员");
+  if (isEmpty(story.owner)) emptyFields.push("处理人");
+  if (!iteration) emptyFields.push("迭代");
+
   return {
     tapdStatus,
     estimatedHours: parseHours(story.effort),
@@ -226,5 +242,6 @@ export async function fetchTapdStoryFields(tapdUrl: string): Promise<TapdStoryFi
     // 月度计划在TAPD上一般是各空间自定义字段，字段名不统一，API模式暂不取；保持工单原值
     monthlyPlan: [],
     subStories,
+    emptyFields,
   };
 }
