@@ -4,11 +4,18 @@
  * 主需求右侧字段面板的选择器已按真实页面 HTML 校准过（.entity-detail-right-col 结构），
  * 覆盖：TAPD状态、预估工时、完成工时、开发人员、测试人员、处理人、迭代、月度计划。
  *
- * 子需求：字段值不在"子需求"页签的列表里，必须逐个点进子需求自己的详情页才能拿全，
- * 因此按 列出入口 -> 逐条进详情页抓取 -> 回到父需求页签 的方式处理。
- * 子需求页签本身的 DOM 结构尚未拿到真实样本，选择器仍是通用猜测；跑的时候把
- * TAPD_DEBUG=true 打开，现场截图/HTML 会存到 backend/.auth/debug/（含 substories-tab），
- * 发回来即可针对性校准。
+ * 子需求：页签内容容器是 .tab-item__sub-story，表格是 TAPD 自研的"tapd-light-table"组件——
+ * 表头（<thead>）和表体（<tbody>）分属两个不同的 <table>，不能像原生表格那样在同一个
+ * <table> 上同时找表头文字和 tbody 行；且表体是虚拟滚动（.agi-virtual-scroll），同一时刻
+ * DOM 里只渲染视口内那一部分行，需要反复滚动该容器直到行数不再增长。
+ * 每一行是 <tr workspace_id="..." id="需求内部id">，行内每个字段格子上都带
+ * data-grid-field="effort"/"developer"/"status" 等固定英文字段名（按真实HTML校准，
+ * 不随界面语言/列宽调整变化，比按表头中文文字模糊匹配稳），值取该格子的 title 属性
+ * （展示态文本），TAPD 用 "-"/"-空-" 表示该字段没填。标题这一列比较特殊，不在
+ * data-grid-field 里，要从标题输入框的链接文本/地址读。子需求表格已经直接含
+ * 状态/开发人员/测试人员/处理人/预估工时/完成工时/迭代等全部所需字段，不需要再逐条
+ * 点进子需求自己的详情页；仍保留"点进详情页覆盖"这一步作为兜底（比如某些视图隐藏了
+ * 列），单条子需求详情抓取失败不影响其余子需求与表格已读到的打底值。
  */
 import fs from "fs";
 import path from "path";
@@ -183,6 +190,71 @@ async function scrollAllToBottom(page: Page) {
   await page.waitForTimeout(1200);
 }
 
+// 子需求页签内容容器固定是 .tab-item__sub-story；每一行子需求实测都是
+// <tr workspace_id="..." id="...">，不依赖任何会随构建变化的 class 哈希
+const SUB_STORY_ROW_SELECTOR = 'tr[workspace_id][id]';
+
+// 统计子需求页签里当前已渲染出的行数，找不到容器时退回整个文档里找，找不到返回 0
+async function countSubStoryRows(page: Page): Promise<number> {
+  return page
+    .evaluate((selector) => {
+      const scope = document.querySelector(".tab-item__sub-story") ?? document;
+      return scope.querySelectorAll(selector).length;
+    }, SUB_STORY_ROW_SELECTOR)
+    .catch(() => 0);
+}
+
+// "子需求"页签固定在详情页顶部（跟左侧主内容同一栏，页签栏就在标题下方）；抓主字段时
+// scrollAllToBottom 已经把整个页面滚到了底部，切到这个页签后如果不滚回顶部，页签内容会停留
+// 在当前可视区域上方看不到——不仅人眼看不到，很多懒加载表格本身就是靠"进入可视区域"才触发
+// 渲染更多行的，页面停在底部会导致它误判"表格不在视口内"而不再加载，必须先滚回顶部
+async function scrollToPageTop(page: Page) {
+  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+  await page.waitForTimeout(300);
+}
+
+// 子需求列表跟当曲云工单列表同样可能是懒加载/虚拟滚动表格：一次滚动只能触发加载视口附近的
+// 那一部分行，必须反复"滚到底部再数一次行数"，直到行数连续几轮都不再增长，才能保证表格里
+// 已经渲染出全部子需求。这里只滚动表格自己的内部滚动容器，不整体滚动页面——
+// 整体滚动会把刚滚回顶部、已经进入可视区域的表格重新挤出视口，跟上面的"先滚回顶部"互相打架
+async function scrollSubStoryTableToLoadAll(page: Page, timeoutMs = 20000): Promise<number> {
+  // 从某一行元素往上找最近的、真的可滚动的祖先容器（即虚拟滚动组件自己的滚动区域），
+  // 只滚这个容器，不整体滚页面
+  const scrollTableContainerOnce = () =>
+    page
+      .evaluate((selector) => {
+        const scope = document.querySelector(".tab-item__sub-story") ?? document;
+        const row = scope.querySelector(selector);
+        if (!row) return;
+        let el: HTMLElement | null = row as HTMLElement;
+        while (el && el !== document.body) {
+          const style = getComputedStyle(el);
+          if ((style.overflowY === "auto" || style.overflowY === "scroll") && el.scrollHeight > el.clientHeight + 10) {
+            el.scrollTop = el.scrollHeight;
+            return;
+          }
+          el = el.parentElement;
+        }
+      }, SUB_STORY_ROW_SELECTOR)
+      .catch(() => {});
+
+  const deadline = Date.now() + timeoutMs;
+  let lastCount = await countSubStoryRows(page);
+  let stableRounds = 0;
+  while (Date.now() < deadline && stableRounds < 3) {
+    await scrollTableContainerOnce();
+    await page.waitForTimeout(500);
+    const count = await countSubStoryRows(page);
+    if (count === lastCount) {
+      stableRounds += 1;
+    } else {
+      stableRounds = 0;
+      lastCount = count;
+    }
+  }
+  return lastCount;
+}
+
 // 按 TAPD 详情页真实结构读取右侧字段面板：每个字段是一个 .entity-detail-right-col 块，
 // 里面 __key 是中文标签、__value 里的 span 上有 title 属性存着显示值（空值时为 "-"）。
 // 按中文标签取值而不是写死 field 名，是因为"测试人员/月度计划"这类是各空间自定义字段
@@ -299,9 +371,10 @@ interface SubStoryEntry {
   title: string;
   url: string | null;
   index: number;
-  // 子需求页签表格里能直接读到的字段（实测该表格含 ID/预估工时/完成工时/标题/迭代/处理人 等列），
-  // 作为进详情页前的打底值；进详情页后抓到的同名字段会覆盖它
-  row: Record<string, string>;
+  // 子需求页签表格实测直接含 status/developer/custom_field_two（本空间的"测试人员"自定义
+  // 字段）/owner/effort/effort_completed/iteration_id 等字段（键名是 TAPD 固定的英文字段名，
+  // 取自每个格子的 data-grid-field 属性），作为进详情页前的打底值；进详情页后同名字段会覆盖它
+  fields: Record<string, string>;
 }
 
 // 切到"子需求"页签，列出每条子需求的入口。
@@ -319,61 +392,56 @@ async function listSubStoryEntries(page: Page, workspaceId: string | null): Prom
 
     await tab.click({ timeout: 10000 });
     await page.waitForTimeout(5000);
-    await scrollAllToBottom(page);
-    // 子需求页签结构尚未按真实HTML校准过，把现场存下来便于后续调整选择器
+    // 子需求页签在页面上方，抓主字段时页面已被滚到底部，这里先滚回顶部让页签内容重新可见，
+    // 再反复滚动表格自身的容器直到行数连续几轮不再增长，避免懒加载/虚拟滚动导致漏行
+    await scrollToPageTop(page);
+    await scrollSubStoryTableToLoadAll(page);
     await dumpDebug(page, "substories-tab");
 
     const rows = await page
-      .evaluate(() => {
-        // 子需求列表是一张带表头的表格，第一列就是子需求的 ID（如 1096555）。
-        // 优先按表格读：这样既拿到 ID（可据此拼出详情地址，比找 <a href> 稳），
-        // 又能顺带把表格里已有的字段先读下来
-        const tables = Array.from(document.querySelectorAll("table"));
-        for (const table of tables) {
-          const headers = Array.from(table.querySelectorAll("thead th, thead td")).map((th) =>
-            (th.textContent ?? "").trim()
+      .evaluate((selector) => {
+        const scope = document.querySelector(".tab-item__sub-story") ?? document;
+        const normalize = (v: string | null) => {
+          const s = (v ?? "").trim();
+          return s === "-" || s === "-空-" || s === "空" ? "" : s;
+        };
+        const trs = Array.from(scope.querySelectorAll(selector));
+        return trs.map((tr) => {
+          const fields: Record<string, string> = {};
+          for (const cell of Array.from(tr.querySelectorAll("[data-grid-field]"))) {
+            const key = cell.getAttribute("data-grid-field");
+            if (!key || key in fields) continue;
+            fields[key] = normalize(cell.getAttribute("title") ?? cell.textContent);
+          }
+          // 标题不在 data-grid-field 里，要从标题输入格里的链接文本/地址读；
+          // 同一个链接的 href 也是这条子需求详情页最可靠的地址（比按 ID 拼地址稳）
+          const titleEl = tr.querySelector<HTMLElement>(
+            ".title-input__link .tapd-grid-edit-link, .tapd-inline-title-input a"
           );
-          if (!headers.some((h) => h.includes("ID") || h.includes("标题"))) continue;
-          const trs = Array.from(table.querySelectorAll("tbody tr"));
-          const out = trs.map((tr) => {
-            const cells = Array.from(tr.querySelectorAll("td")).map((td) => (td.textContent ?? "").trim());
-            const row: Record<string, string> = {};
-            headers.forEach((h, i) => {
-              if (h) row[h] = cells[i] ?? "";
-            });
-            // 行内任意一个指向需求详情的链接（有就用，没有就靠 ID 拼地址）
-            const link = tr.querySelector<HTMLAnchorElement>(
-              'a[href*="/story/detail/"], a[href*="/stories/view/"]'
-            );
-            // ID 优先取"ID"列，取不到就从所有单元格里找一串足够长的纯数字
-            const idFromColumn = Object.entries(row).find(([k]) => k.includes("ID"))?.[1] ?? "";
-            const id = /^\d{6,}$/.test(idFromColumn)
-              ? idFromColumn
-              : cells.find((c) => /^\d{6,}$/.test(c)) ?? "";
-            return { row, href: link?.href ?? "", id };
-          });
-          if (out.length > 0) return out;
-        }
-        return [];
-      })
-      .catch(() => [] as { row: Record<string, string>; href: string; id: string }[]);
+          const idEl = tr.querySelector<HTMLElement>(".tapd-grid-edit-link.id");
+          return {
+            storyId: tr.getAttribute("id") ?? "",
+            title: (titleEl?.textContent ?? "").trim(),
+            href: titleEl?.getAttribute("href") || idEl?.getAttribute("href") || "",
+            fields,
+          };
+        });
+      }, SUB_STORY_ROW_SELECTOR)
+      .catch(
+        () => [] as { storyId: string; title: string; href: string; fields: Record<string, string> }[]
+      );
 
     if (rows.length === 0) return null;
 
-    const pick = (row: Record<string, string>, ...keys: string[]) => {
-      for (const k of Object.keys(row)) {
-        if (keys.some((key) => k.includes(key))) return row[k];
-      }
-      return "";
-    };
-
     return rows.map((r, index) => ({
-      storyId: r.id,
-      title: pick(r.row, "标题", "名称"),
+      storyId: r.storyId,
+      title: r.title,
       // 有现成链接就用；否则用 ID 拼详情地址（同一空间下的标准详情地址格式）
-      url: r.href || (r.id && workspaceId ? `https://www.tapd.cn/tapd_fe/${workspaceId}/story/detail/${r.id}` : null),
+      url:
+        r.href ||
+        (r.storyId && workspaceId ? `https://www.tapd.cn/tapd_fe/${workspaceId}/story/detail/${r.storyId}` : null),
       index,
-      row: r.row,
+      fields: r.fields,
     }));
   } catch {
     return null;
@@ -456,9 +524,9 @@ export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promis
   const fields = await extractStoryDetailFields(page, 600000);
   await dumpDebug(page, "extracted");
 
-  // 子需求：字段值不在页签列表里，必须逐个点进子需求自己的详情页才能拿全。
-  // 先在页签里列出每条子需求的入口，再挨个进去，用与主需求完全相同的
-  //"停留到字段渲染稳定"方式抓取；每处理完一条都回到父需求的子需求页签，再处理下一条
+  // 子需求：页签表格实测已直接含 状态/开发人员/测试人员/处理人/预估工时/完成工时/迭代
+  // 等全部所需字段（listSubStoryEntries 按 data-grid-field 属性读取），不需要每条都逐个进详情页；
+  // 仍保留"点进详情页覆盖"这一步作为兜底（比如某些视图隐藏了列），单条失败不影响其余子需求
   const workspaceId = tapdUrl.match(/tapd\.cn\/(?:tapd_fe\/)?(\d+)\//)?.[1] ?? null;
   const entries = await listSubStoryEntries(page, workspaceId);
   if (entries === null) {
@@ -466,37 +534,33 @@ export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promis
   } else if (entries.length === 0) {
     fields.subStories = []; // 确认没有子需求
   } else {
-    const pickRow = (row: Record<string, string>, ...keys: string[]) => {
-      for (const k of Object.keys(row)) {
-        if (keys.some((key) => k.includes(key))) return row[k];
-      }
-      return "";
-    };
-
     const subStories: TapdSubStoryFields[] = [];
     for (const entry of entries) {
-      // 先用页签表格里读到的值打底（表格已含 预估工时/完成工时/迭代/处理人 等列），
-      // 这样即便某条子需求详情页进不去，也不至于整条为空
+      // 先用页签表格里读到的值打底，这样即便某条子需求详情页进不去，也不至于整条为空。
+      // custom_field_two 是本 TAPD 空间的自定义字段，跟主需求右侧字段面板里"测试人员"
+      // 的字段口径一致（见文件顶部说明），换个空间编号可能对不上，需要时按实际情况调整
+      const f = entry.fields;
       const sub: TapdSubStoryFields = {
         storyId: entry.storyId || String(entry.index + 1),
         title: entry.title,
         tapdUrl: entry.url,
-        tapdStatus: pickRow(entry.row, "状态") || null,
-        developer: parseNameList(pickRow(entry.row, "开发人员")),
-        tester: parseNameList(pickRow(entry.row, "测试人员")),
-        currentHandler: parseNameList(pickRow(entry.row, "处理人"))[0] ?? null,
-        estimatedHours: parseHours(pickRow(entry.row, "预估工时")),
-        actualHours: parseHours(pickRow(entry.row, "完成工时", "消耗工时")),
-        iterationName: pickRow(entry.row, "迭代") || null,
+        tapdStatus: f.status || null,
+        developer: parseNameList(f.developer || null),
+        tester: parseNameList(f.custom_field_two || null),
+        currentHandler: parseNameList(f.owner || null)[0] ?? null,
+        estimatedHours: parseHours(f.effort || null),
+        actualHours: parseHours(f.effort_completed || null),
+        iterationName: f.iteration_id || null,
       };
 
-      // 再点进这条子需求自己的详情页，把表格里没有的字段（开发人员/测试人员等）补齐
+      // 再点进这条子需求自己的详情页，把表格里没有的字段补齐（正常情况下表格已经给全了，
+      // 这一步大多数时候不会改变结果，只是兜底）
       try {
         if (entry.url) {
           await clickToNavigate(page, entry.url);
         } else {
           // 没有可用地址，只能按行序号真实点击进去
-          await page.locator("table tbody tr").nth(entry.index).click({ timeout: 10000 });
+          await page.locator(SUB_STORY_ROW_SELECTOR).nth(entry.index).click({ timeout: 10000 });
           await page.waitForTimeout(3000);
         }
 

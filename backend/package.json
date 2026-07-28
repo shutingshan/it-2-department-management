@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "scrape:dangquyun": "ts-node-dev --transpile-only --exit-child src/scripts/scrapeDangquyun.ts",
+    "scrape:tapd-story": "ts-node-dev --transpile-only --exit-child src/scripts/scrapeTapdStory.ts",
     "tapd:login": "ts-node-dev --transpile-only --exit-child src/scripts/tapdLogin.ts"
   },
   "keywords": [],
