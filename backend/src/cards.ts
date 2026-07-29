@@ -167,12 +167,60 @@ export const CARD_DEFS: CardDef[] = [
     match: (t) => t.stage === "已排期",
   },
   {
+    id: "scheduled-not-overdue",
+    parentId: "scheduled",
+    label: "未超期",
+    description: "已排期待开发，当前日期未超过预计完成时间",
+    red: false,
+    match: (t, now) => {
+      if (t.stage !== "已排期") return false;
+      const d = daysBetween(now, t.expectedCompleteTime);
+      return d !== null && d <= 0;
+    },
+  },
+  {
+    id: "scheduled-overdue",
+    parentId: "scheduled",
+    label: "已超期",
+    description: "已排期待开发，当前日期已超过预计完成时间",
+    red: true,
+    match: (t, now) => {
+      if (t.stage !== "已排期") return false;
+      const d = daysBetween(now, t.expectedCompleteTime);
+      return d !== null && d > 0;
+    },
+  },
+  {
     id: "developing",
     parentId: null,
     label: "开发中",
     description: null,
     red: false,
     match: (t) => t.stage === "开发中",
+  },
+  {
+    id: "developing-near",
+    parentId: "developing",
+    label: "3天内将超期",
+    description: "工单阶段为开发中且预计完成时间-当前日期在3天内的工单数",
+    red: false,
+    match: (t, now) => {
+      if (t.stage !== "开发中") return false;
+      const d = daysBetween(now, t.expectedCompleteTime);
+      return d !== null && d >= -3 && d <= 0;
+    },
+  },
+  {
+    id: "developing-overdue",
+    parentId: "developing",
+    label: "已超期",
+    description: "工单阶段为开发中且已超预计完成时间的工单数",
+    red: true,
+    match: (t, now) => {
+      if (t.stage !== "开发中") return false;
+      const d = daysBetween(now, t.expectedCompleteTime);
+      return d !== null && d > 0;
+    },
   },
   {
     id: "testing",
