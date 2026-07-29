@@ -16,7 +16,6 @@ interface FlatDept {
 interface FormValues {
   name: string;
   parentId?: string;
-  childIds?: string[];
 }
 
 export default function DeptConfig() {
@@ -55,14 +54,13 @@ export default function DeptConfig() {
     form.setFieldsValue({
       name: dept.name,
       parentId: dept.parentId ?? undefined,
-      childIds: flat.filter((d) => d.parentId === dept.id).map((d) => d.id),
     });
     setModalOpen(true);
   }
 
   async function handleSubmit() {
     const values = await form.validateFields();
-    const payload = { name: values.name, parentId: values.parentId ?? null, childIds: values.childIds ?? [] };
+    const payload = { name: values.name, parentId: values.parentId ?? null };
     setSubmitting(true);
     try {
       if (editing) {
@@ -107,11 +105,6 @@ export default function DeptConfig() {
 
   const parentOptions = flat
     .filter((d) => d.id !== editing?.id && !descendantIds.has(d.id))
-    .map((d) => ({ value: d.id, label: d.name }));
-
-  // 下级部门候选：排除自己
-  const childOptions = flat
-    .filter((d) => d.id !== editing?.id)
     .map((d) => ({ value: d.id, label: d.name }));
 
   const treeData: DataNode[] = useMemo(() => {
@@ -177,19 +170,9 @@ export default function DeptConfig() {
             <Input placeholder="请输入部门名称" />
           </Form.Item>
           <Form.Item name="parentId" label="上级部门">
-            <Select allowClear options={parentOptions} placeholder="不选则为顶级部门" />
-          </Form.Item>
-          <Form.Item name="childIds" label="下级部门">
-            <Select
-              mode="multiple"
-              allowClear
-              options={childOptions}
-              placeholder="可多选，作为该部门的下级"
-              showSearch
-              filterOption={(input, option) =>
+            <Select allowClear options={parentOptions} placeholder="不选则为顶级部门" showSearch filterOption={(input, option) =>
                 (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
-              }
-            />
+              } />
           </Form.Item>
         </Form>
       </Modal>
