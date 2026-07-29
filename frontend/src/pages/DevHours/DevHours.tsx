@@ -52,8 +52,29 @@ export default function DevHours() {
 
   const filteredIterationTickets = useMemo(() => {
     if (!data) return [];
-    return devFilter ? data.iterationTickets.filter((t: any) => t.developer === devFilter) : data.iterationTickets;
+    if (!devFilter) return data.iterationTickets;
+    // 一行可能对应多个开发人员（顿号拼接），按人名精确匹配，不能整串比较
+    return data.iterationTickets.filter((t: any) =>
+      t.developer
+        .split(/[、,，]/)
+        .map((s: string) => s.trim())
+        .includes(devFilter)
+    );
   }, [data, devFilter]);
+
+  const deptHoursOption = useMemo(() => {
+    if (!data) return {};
+    return {
+      tooltip: { trigger: "axis" },
+      legend: { data: ["已花费实际工时", "预估待花费工时"] },
+      xAxis: { type: "category", data: data.deptHours.map((d: any) => d.deptName) },
+      yAxis: { type: "value" },
+      series: [
+        { name: "已花费实际工时", type: "bar", data: data.deptHours.map((d: any) => d.spentHours) },
+        { name: "预估待花费工时", type: "bar", data: data.deptHours.map((d: any) => d.estimatedSpentHours) },
+      ],
+    };
+  }, [data]);
 
   if (!data) return null;
 
@@ -133,6 +154,7 @@ export default function DevHours() {
                 { title: "发起人", dataIndex: "requester" },
                 { title: "标题", dataIndex: "title", ellipsis: true },
                 { title: "内容", dataIndex: "content", ellipsis: true },
+                { title: "开发人员", dataIndex: "developer", width: 100, ellipsis: true },
                 { title: "迭代", dataIndex: "iteration" },
                 { title: "预估工时", dataIndex: "estimatedHours" },
                 { title: "实际工时", dataIndex: "actualHours" },
@@ -192,6 +214,26 @@ export default function DevHours() {
                 },
               ]}
             />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={12}>
+        <Col span={24}>
+          <Card
+            size="small"
+            title="各部门开发工时花费情况"
+            extra={
+              <Select
+                size="small"
+                value={year}
+                onChange={setYear}
+                style={{ width: 90 }}
+                options={[2024, 2025, 2026].map((y) => ({ value: y, label: y }))}
+              />
+            }
+          >
+            <ReactECharts option={deptHoursOption} style={{ height: 260 }} />
           </Card>
         </Col>
       </Row>

@@ -124,12 +124,78 @@ router.get("/home", (req, res) => {
 });
 
 // ---------- 开发工时统计 ----------
+
+// 工时统计的最小单元：没有子需求的工单，统计单元就是工单自己；有子需求的工单，
+// 每条子需求各自算一个独立的统计单元（各自的开发人员/工时/迭代都可能不同，不能只看父需求）。
+// 是否"已完成"、提交时间等生命周期字段子需求没有自己的一份，统一沿用父需求的
+interface DevHourUnit {
+  code: string; // 展示用编号：无子需求就是工单编号，有子需求是"父编号-子需求编号"
+  title: string;
+  content: string;
+  owningApp: string;
+  requester: string;
+  requesterDept: string;
+  tapdUrl: string | null;
+  iterationNames: string[];
+  developers: string[];
+  estimatedHours: number;
+  actualHours: number;
+  parentStage: Ticket["stage"];
+  parentStatus: Ticket["status"];
+  parentActualCompleteTime: string | null;
+  parentSubmittedAt: string;
+}
+
+function splitNames(v: string): string[] {
+  return v
+    .split(/[、,，;；\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function expandToDevHourUnits(t: Ticket): DevHourUnit[] {
+  const shared = {
+    content: t.content, // 子需求没有自己独立的内容字段，统一沿用父需求的
+    owningApp: t.owningApp,
+    requester: t.requester,
+    requesterDept: t.requesterDept,
+    parentStage: t.stage,
+    parentStatus: t.status,
+    parentActualCompleteTime: t.actualCompleteTime,
+    parentSubmittedAt: t.submittedAt,
+  };
+  if (t.subTickets.length === 0) {
+    return [
+      {
+        ...shared,
+        code: t.code,
+        title: t.title,
+        tapdUrl: t.tapdUrl,
+        iterationNames: t.iterations.map((i) => i.name),
+        developers: t.developer.length ? t.developer : ["未分配"],
+        estimatedHours: t.estimatedHours,
+        actualHours: t.actualHours,
+      },
+    ];
+  }
+  return t.subTickets.map((s) => ({
+    ...shared,
+    code: `${t.code}-${s.code}`,
+    title: s.title || t.title,
+    tapdUrl: s.tapdUrl ?? t.tapdUrl,
+    iterationNames: s.iteration ? [s.iteration.name] : [],
+    developers: s.developer.trim() ? splitNames(s.developer) : ["未分配"],
+    estimatedHours: s.estimatedHours,
+    actualHours: s.actualHours,
+  }));
+}
+
 router.get("/dev-hours", (req, res) => {
   const tickets = store.tickets;
+  const units = tickets.flatMap(expandToDevHourUnits);
+
   const allIterations = Array.from(
-    new Map(
-      tickets.flatMap((t) => t.iterations).map((it) => [it.name, it])
-    ).values()
+    new Map(tickets.flatMap((t) => t.iterations).map((it) => [it.name, it])).values()
   ).sort((a, b) => (a.start < b.start ? 1 : -1)); // 倒序
 
   const today = dayjs("2026-07-24");
@@ -140,21 +206,15 @@ router.get("/dev-hours", (req, res) => {
   }
   const selectedIteration = String(req.query.iteration ?? current?.name ?? allIterations[0]?.name);
 
-  function ticketsInIteration(name: string): Ticket[] {
-    return tickets.filter(
-      (t) => t.iterations.some((i) => i.name === name) || t.subTickets.some((s) => s.iteration?.name === name)
-    );
-  }
+  const iterationUnits = units.filter((u) => u.iterationNames.includes(selectedIteration));
 
-  const iterationTicketsRaw = ticketsInIteration(selectedIteration);
   const iterationSummaryMap: Record<string, { ticketCount: number; estimatedHours: number; actualHours: number }> = {};
-  iterationTicketsRaw.forEach((t) => {
-    const devs = t.developer.length ? t.developer : ["未分配"];
-    devs.forEach((dev) => {
+  iterationUnits.forEach((u) => {
+    u.developers.forEach((dev) => {
       if (!iterationSummaryMap[dev]) iterationSummaryMap[dev] = { ticketCount: 0, estimatedHours: 0, actualHours: 0 };
       iterationSummaryMap[dev].ticketCount += 1;
-      iterationSummaryMap[dev].estimatedHours += t.estimatedHours;
-      iterationSummaryMap[dev].actualHours += t.actualHours;
+      iterationSummaryMap[dev].estimatedHours += u.estimatedHours;
+      iterationSummaryMap[dev].actualHours += u.actualHours;
     });
   });
   const iterationSummary = Object.entries(iterationSummaryMap).map(([developer, v]) => ({
@@ -165,34 +225,35 @@ router.get("/dev-hours", (req, res) => {
     diffHours: Number((v.actualHours - v.estimatedHours).toFixed(1)),
   }));
 
-  // 迭代工单列表（仅保留指定字段）
-  const iterationTickets = iterationTicketsRaw.map((t) => ({
-    code: t.code,
-    tapdUrl: t.tapdUrl,
-    owningApp: t.owningApp,
-    requester: t.requester,
-    title: t.title,
-    content: t.content,
+  // 迭代工单列表：有子需求的工单在这里会拆成多行，一行对应一个统计单元
+  const iterationTickets = iterationUnits.map((u) => ({
+    code: u.code,
+    tapdUrl: u.tapdUrl,
+    owningApp: u.owningApp,
+    requester: u.requester,
+    title: u.title,
+    content: u.content,
+    developer: u.developers.join("、"),
     iteration: selectedIteration,
-    estimatedHours: t.estimatedHours,
-    actualHours: t.actualHours,
-    hoursDeviation: hoursDeviation(t),
+    estimatedHours: u.estimatedHours,
+    actualHours: u.actualHours,
+    hoursDeviation: hoursDeviation(u),
   }));
 
-  // 每个开发每年完成的工单数、预估/实际总工时、差异工时
+  // 每个开发每年完成的统计单元数、预估/实际总工时、差异工时
   const year = Number(req.query.year ?? 2026);
+  const annualUnits = units.filter(
+    (u) => (u.parentStatus === "已完成" || u.parentStatus === "已解决") && inYear(u.parentActualCompleteTime, year)
+  );
   const annualMap: Record<string, { completedCount: number; estimatedHours: number; actualHours: number }> = {};
-  tickets
-    .filter((t) => (t.status === "已完成" || t.status === "已解决") && inYear(t.actualCompleteTime, year))
-    .forEach((t) => {
-      const devs = t.developer.length ? t.developer : ["未分配"];
-      devs.forEach((dev) => {
-        if (!annualMap[dev]) annualMap[dev] = { completedCount: 0, estimatedHours: 0, actualHours: 0 };
-        annualMap[dev].completedCount += 1;
-        annualMap[dev].estimatedHours += t.estimatedHours;
-        annualMap[dev].actualHours += t.actualHours;
-      });
+  annualUnits.forEach((u) => {
+    u.developers.forEach((dev) => {
+      if (!annualMap[dev]) annualMap[dev] = { completedCount: 0, estimatedHours: 0, actualHours: 0 };
+      annualMap[dev].completedCount += 1;
+      annualMap[dev].estimatedHours += u.estimatedHours;
+      annualMap[dev].actualHours += u.actualHours;
     });
+  });
   const annualSummary = Object.entries(annualMap).map(([developer, v]) => ({
     developer,
     completedCount: v.completedCount,
@@ -201,15 +262,37 @@ router.get("/dev-hours", (req, res) => {
     diffHours: Number((v.actualHours - v.estimatedHours).toFixed(1)),
   }));
 
+  // 过去几年整体开发工时花费情况（已完成/已解决的统计单元，按年汇总预估/实际工时）
   const years = [2024, 2025, 2026];
   const yoyTrend = years.map((y) => {
-    const done = tickets.filter(
-      (t) => (t.status === "已完成" || t.status === "已解决") && inYear(t.actualCompleteTime, y)
+    const done = units.filter(
+      (u) => (u.parentStatus === "已完成" || u.parentStatus === "已解决") && inYear(u.parentActualCompleteTime, y)
     );
     return {
       year: y,
-      estimatedHours: Number(done.reduce((s, t) => s + t.estimatedHours, 0).toFixed(1)),
-      actualHours: Number(done.reduce((s, t) => s + t.actualHours, 0).toFixed(1)),
+      estimatedHours: Number(done.reduce((s, u) => s + u.estimatedHours, 0).toFixed(1)),
+      actualHours: Number(done.reduce((s, u) => s + u.actualHours, 0).toFixed(1)),
+    };
+  });
+
+  // 各部门开发工时花费情况：按发起部门（requesterDept）归到顶级部门口径，
+  // 筛选口径（按提交年份圈定范围、已完成/关闭算已花费实际工时、其余算预估待花费工时）
+  // 跟已有的"部门统计"页面保持一致，只是这里的工时改用子需求感知后的统计单元
+  const topDepts = getTopLevelDepartments();
+  const deptHours = topDepts.map((root) => {
+    const childIds = [root.id, ...getChildDeptIds(root.id)];
+    const rows = units.filter((u) => childIds.includes(u.requesterDept) && inYear(u.parentSubmittedAt, year));
+    const spentHours = rows
+      .filter((u) => u.parentStage === "已完成" || u.parentStage === "关闭")
+      .reduce((s, u) => s + u.actualHours, 0);
+    const estimatedSpentHours = rows
+      .filter((u) => u.parentStage !== "已完成" && u.parentStage !== "关闭")
+      .reduce((s, u) => s + u.estimatedHours, 0);
+    return {
+      deptId: root.id,
+      deptName: root.name,
+      spentHours: Number(spentHours.toFixed(1)),
+      estimatedSpentHours: Number(estimatedSpentHours.toFixed(1)),
     };
   });
 
@@ -220,6 +303,7 @@ router.get("/dev-hours", (req, res) => {
     iterationTickets,
     annualSummary,
     yoyTrend,
+    deptHours,
   });
 });
 
