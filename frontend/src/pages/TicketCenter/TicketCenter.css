@@ -129,3 +129,45 @@
 .tc-table-card .ant-table-content {
   overflow-y: auto !important;
 }
+
+/* 表头右边缘的列宽拖拽手柄：跟拖拽排序用的 .tc-col-drag-handle 是兄弟节点、不互相嵌套，
+   两者的指针事件不会冒泡穿过彼此，可以同时存在不冲突 */
+.tc-col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 1;
+  touch-action: none;
+}
+
+.tc-col-resize-handle:hover,
+.tc-col-resize-handle:active {
+  background: #91caff;
+}
+
+/* 拖拽列宽期间选中态文字容易被误选，全局临时禁用；由 body.tc-resizing 控制，见组件里的拖拽逻辑 */
+body.tc-resizing {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+/* 标题/内容这类长文本列：单元格里省略号截断的文字，点击后弹出完整内容 */
+.tc-expandable-cell {
+  cursor: pointer;
+}
+
+.tc-expandable-cell:hover {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.tc-expandable-popover-content {
+  max-width: 420px;
+  max-height: 300px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
