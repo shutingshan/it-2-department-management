@@ -194,9 +194,17 @@ router.get("/dev-hours", (req, res) => {
   const tickets = store.tickets;
   const units = tickets.flatMap(expandToDevHourUnits);
 
+  // 排序用的日期键：优先用迭代自己的起始日期（API模式才有真实值）；浏览器模式抓不到
+  // 起止日期，start/end 永远是空字符串，这时候改成从迭代名称里解析形如"260810~260814"
+  // 开头的6位数字（年月日）当排序键，解析不出来再退回按名称本身排序，保证倒序排列有意义
+  function iterationSortKey(it: { name: string; start: string }): string {
+    if (it.start) return it.start;
+    const m = it.name.match(/^(\d{6})/);
+    return m ? m[1] : it.name;
+  }
   const allIterations = Array.from(
     new Map(tickets.flatMap((t) => t.iterations).map((it) => [it.name, it])).values()
-  ).sort((a, b) => (a.start < b.start ? 1 : -1)); // 倒序
+  ).sort((a, b) => (iterationSortKey(a) < iterationSortKey(b) ? 1 : -1)); // 倒序，新的排前面
 
   const today = dayjs("2026-07-24");
   let current = allIterations.find((it) => !today.isBefore(it.start) && !today.isAfter(it.end));
@@ -204,9 +212,19 @@ router.get("/dev-hours", (req, res) => {
     // 回退到当前日期之前最近的迭代
     current = allIterations.find((it) => dayjs(it.end).isBefore(today));
   }
-  const selectedIteration = String(req.query.iteration ?? current?.name ?? allIterations[0]?.name);
+  // 迭代筛选支持多选 + "全部迭代"：不传 iterations 参数（或传空）就是"全部迭代"，
+  // 不按任何迭代过滤；首次进入页面时前端会带上"当前迭代"作为默认选中项
+  const requestedIterations = (
+    Array.isArray(req.query.iterations)
+      ? (req.query.iterations as unknown[]).map(String)
+      : req.query.iterations
+      ? String(req.query.iterations).split(",")
+      : []
+  ).filter(Boolean);
 
-  const iterationUnits = units.filter((u) => u.iterationNames.includes(selectedIteration));
+  const iterationUnits = requestedIterations.length
+    ? units.filter((u) => u.iterationNames.some((n) => requestedIterations.includes(n)))
+    : units;
 
   const iterationSummaryMap: Record<string, { ticketCount: number; estimatedHours: number; actualHours: number }> = {};
   iterationUnits.forEach((u) => {
@@ -234,7 +252,7 @@ router.get("/dev-hours", (req, res) => {
     title: u.title,
     content: u.content,
     developer: u.developers.join("、"),
-    iteration: selectedIteration,
+    iteration: u.iterationNames.join("、"),
     estimatedHours: u.estimatedHours,
     actualHours: u.actualHours,
     hoursDeviation: hoursDeviation(u),
@@ -298,7 +316,8 @@ router.get("/dev-hours", (req, res) => {
 
   res.json({
     iterations: allIterations,
-    currentIteration: selectedIteration,
+    // 供前端首次进入页面时用作默认选中项（单个迭代名）；用户后续可自己多选或选"全部迭代"
+    currentIteration: current?.name ?? allIterations[0]?.name ?? null,
     iterationSummary,
     iterationTickets,
     annualSummary,
@@ -419,17 +438,6 @@ router.get("/departments", (req, res) => {
     deptName: d.deptName,
     values: d.monthly.map((m, i) => pct(m.estimatedSpentHours, monthlyEstTotal[i])),
   }));
-  // 同样口径下的月度绝对工时（不做百分比归一），用于看每个部门逐月的工时变化趋势本身
-  const monthlySpentHoursTrend = monthlyDeptHours.map((d) => ({
-    deptId: d.deptId,
-    deptName: d.deptName,
-    values: d.monthly.map((m) => Number(m.spentHours.toFixed(1))),
-  }));
-  const monthlyEstimatedHoursTrend = monthlyDeptHours.map((d) => ({
-    deptId: d.deptId,
-    deptName: d.deptName,
-    values: d.monthly.map((m) => Number(m.estimatedSpentHours.toFixed(1))),
-  }));
 
   res.json({
     cards,
@@ -439,8 +447,6 @@ router.get("/departments", (req, res) => {
     estimatedHoursRatio,
     monthlySpentSharePercent,
     monthlyEstimatedSharePercent,
-    monthlySpentHoursTrend,
-    monthlyEstimatedHoursTrend,
     departments: store.departments,
   });
 });
