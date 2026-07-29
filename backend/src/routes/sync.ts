@@ -2,7 +2,6 @@ import { Router } from "express";
 import dayjs from "dayjs";
 import { store } from "../store";
 import { dedupe, resolveStage, stripCurrentIterationTag } from "../mapping";
-import { fetchTapdDelta } from "../adapters/tapd";
 import { SyncJob } from "../store";
 import { ScrapedRow, scrapeDangquyunTicketList } from "../scrapers/dangquyunScraper";
 import { mapScrapedRowToTicket } from "../scrapers/dangquyunMapper";
@@ -182,7 +181,14 @@ function finishJob(job: SyncJob) {
   }
 }
 
-// 更新工单：供路由与定时任务共用。done 在任务完成（含被终止）时 resolve，便于定时任务链式等待
+// 更新工单：供路由与定时任务共用。done 在任务完成（含被终止）时 resolve，便于定时任务链式等待。
+//
+// 当曲云没有"按编号查询单条"的接口/页面，只能把候选工单所在的当曲云工单列表整份抓一遍
+// （复用获取新工单同一套抓取逻辑），再按编号匹配出这次要更新的候选工单、应用最新字段
+// （复用 mapScrapedRowToTicket，跟获取新工单全量模式覆盖已有工单走的是同一套映射口径，
+// 包括"实际梳理完成"这类只在当曲云列表里、不需要进详情页才能拿到的字段）。
+// 未在当曲云列表里匹配到编号的候选工单、或整份列表都抓取失败，记为失败并反填 dangquyunErrorNote，
+// 不影响其余候选工单
 export function startUpdateTicketsJob(actor: string, filters?: unknown): { job: SyncJob; done: Promise<SyncJob> } {
   const candidates = resolveCandidates(filters);
   const job: SyncJob = {
@@ -203,50 +209,62 @@ export function startUpdateTicketsJob(actor: string, filters?: unknown): { job: 
     jobDoneResolver = resolve;
   });
 
-  let idx = 0;
   stopJobTimer();
-  jobTimer = setInterval(async () => {
-    if (job.status !== "running") {
-      finishJob(job);
-      return;
+
+  (async () => {
+    const rowsByCode = new Map<string, ScrapedRow>();
+    let scrapeError: string | null = null;
+    try {
+      const result = await scrapeDangquyunTicketList();
+      for (const row of result.rows) {
+        const code = row["编号"]?.trim();
+        if (code) rowsByCode.set(code, row);
+      }
+    } catch (e) {
+      scrapeError = (e as Error).message ?? "当曲云抓取失败";
     }
-    const batch = candidates.slice(idx, idx + 5);
-    idx += 5;
-    for (const ticket of batch) {
-      try {
-        const delta = await fetchTapdDelta(ticket, Math.random);
-        if (delta.failReason) {
-          job.failed += 1;
-          job.failReasons.push(`${ticket.code}: ${delta.failReason}`);
-          store.addChangeLog(ticket, []);
-        } else {
-          if (delta.status) ticket.status = delta.status;
-          if (delta.devStatus !== undefined) ticket.devStatus = delta.devStatus;
-          const newStage = resolveStage(ticket.status, ticket.devStatus, ticket.iterations);
-          if (newStage !== ticket.stage) {
-            store.addChangeLog(ticket, [
-              {
-                field: "stage",
-                oldValue: ticket.stage,
-                newValue: newStage,
-                time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
-                actor: "系统同步",
-              },
-            ]);
-            ticket.stage = newStage;
-            if (newStage === "已完成" && !ticket.actualCompleteTime) {
-              ticket.actualCompleteTime = dayjs().format("YYYY-MM-DD");
-            }
-          }
-          job.success += 1;
-        }
-      } catch {
+
+    for (const ticket of candidates) {
+      if (job.status !== "running") break; // 被 /terminate 手动终止
+
+      const failReason = scrapeError ?? (rowsByCode.has(ticket.code) ? null : "当曲云工单列表中未找到该编号");
+      if (failReason) {
         job.failed += 1;
-        job.failReasons.push(`${ticket.code}: 未知错误`);
+        job.failReasons.push(`${ticket.code}: ${failReason}`);
+        ticket.dangquyunErrorNote = { time: dayjs().format("YYYY-MM-DD HH:mm:ss"), message: failReason };
+        job.processed += 1;
+        continue;
+      }
+
+      try {
+        const row = rowsByCode.get(ticket.code)!;
+        const title = row["标题"]?.trim();
+        if (!title) throw new Error("标题字段获取失败");
+        const oldStage = ticket.stage;
+        Object.assign(ticket, mapScrapedRowToTicket(row, ticket));
+        ticket.dangquyunErrorNote = null;
+        if (ticket.stage !== oldStage) {
+          store.addChangeLog(ticket, [
+            {
+              field: "stage",
+              oldValue: oldStage,
+              newValue: ticket.stage,
+              time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
+              actor: "系统同步",
+            },
+          ]);
+        }
+        job.success += 1;
+      } catch (e) {
+        const reason = (e as Error).message ?? "数据解析失败";
+        job.failed += 1;
+        job.failReasons.push(`${ticket.code}: ${reason}`);
+        ticket.dangquyunErrorNote = { time: dayjs().format("YYYY-MM-DD HH:mm:ss"), message: reason };
       }
       job.processed += 1;
     }
-    if (idx >= candidates.length) {
+
+    if (job.status === "running") {
       job.status = "done";
       job.finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
       store.lastUpdateTime = job.finishedAt;
@@ -256,11 +274,13 @@ export function startUpdateTicketsJob(actor: string, filters?: unknown): { job: 
         actor,
         success: job.failed === 0,
         failReason: job.failed ? job.failReasons.join("; ") : null,
-        detail: `批量更新完成，成功 ${job.success} 条，失败 ${job.failed} 条`,
+        detail: scrapeError
+          ? `批量更新失败：获取当曲云工单列表出错（${scrapeError}）`
+          : `批量更新完成，成功 ${job.success} 条，失败 ${job.failed} 条`,
       });
-      finishJob(job);
     }
-  }, 400);
+    finishJob(job);
+  })();
 
   return { job, done };
 }
