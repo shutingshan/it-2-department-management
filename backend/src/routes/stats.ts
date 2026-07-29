@@ -375,7 +375,74 @@ router.get("/departments", (req, res) => {
   const spentHoursRatio = byDept.map((d) => ({ deptName: d.deptName, value: d.spentHours }));
   const estimatedHoursRatio = byDept.map((d) => ({ deptName: d.deptName, value: d.estimatedSpentHours }));
 
-  res.json({ cards, byDept, monthlyTrend, spentHoursRatio, estimatedHoursRatio, departments: store.departments });
+  // 各部门月度工时花费占比：按提交月份切片（未选具体年份时固定看 2026 年，
+  // 跟上面"父级部门月度提交及完成趋势"用的是同一个口径），工时统计沿用"统计单元"
+  // 口径（没有子需求按工单自己算，有子需求按每条子需求各自算），
+  // 每个部门在当月的份额 = 该部门当月数值 / 当月所有部门合计数值 * 100
+  const ratioYear = year ?? 2026;
+  const units = scoped.flatMap(expandToDevHourUnits);
+  const monthlyDeptHours = topDepts.map((root) => {
+    const childIds = [root.id, ...getChildDeptIds(root.id)];
+    const monthly = Array.from({ length: 12 }, (_, m) => {
+      const rows = units.filter(
+        (u) =>
+          childIds.includes(u.requesterDept) &&
+          dayjs(u.parentSubmittedAt).year() === ratioYear &&
+          dayjs(u.parentSubmittedAt).month() === m
+      );
+      const spentHours = rows
+        .filter((u) => u.parentStage === "已完成" || u.parentStage === "关闭")
+        .reduce((s, u) => s + u.actualHours, 0);
+      const estimatedSpentHours = rows
+        .filter((u) => u.parentStage !== "已完成" && u.parentStage !== "关闭")
+        .reduce((s, u) => s + u.estimatedHours, 0);
+      return { spentHours, estimatedSpentHours };
+    });
+    return { deptId: root.id, deptName: root.name, monthly };
+  });
+
+  const monthlySpentTotal = Array.from({ length: 12 }, (_, m) =>
+    monthlyDeptHours.reduce((s, d) => s + d.monthly[m].spentHours, 0)
+  );
+  const monthlyEstTotal = Array.from({ length: 12 }, (_, m) =>
+    monthlyDeptHours.reduce((s, d) => s + d.monthly[m].estimatedSpentHours, 0)
+  );
+  const pct = (v: number, total: number) => (total > 0 ? Number(((v / total) * 100).toFixed(1)) : 0);
+
+  const monthlySpentSharePercent = monthlyDeptHours.map((d) => ({
+    deptId: d.deptId,
+    deptName: d.deptName,
+    values: d.monthly.map((m, i) => pct(m.spentHours, monthlySpentTotal[i])),
+  }));
+  const monthlyEstimatedSharePercent = monthlyDeptHours.map((d) => ({
+    deptId: d.deptId,
+    deptName: d.deptName,
+    values: d.monthly.map((m, i) => pct(m.estimatedSpentHours, monthlyEstTotal[i])),
+  }));
+  // 同样口径下的月度绝对工时（不做百分比归一），用于看每个部门逐月的工时变化趋势本身
+  const monthlySpentHoursTrend = monthlyDeptHours.map((d) => ({
+    deptId: d.deptId,
+    deptName: d.deptName,
+    values: d.monthly.map((m) => Number(m.spentHours.toFixed(1))),
+  }));
+  const monthlyEstimatedHoursTrend = monthlyDeptHours.map((d) => ({
+    deptId: d.deptId,
+    deptName: d.deptName,
+    values: d.monthly.map((m) => Number(m.estimatedSpentHours.toFixed(1))),
+  }));
+
+  res.json({
+    cards,
+    byDept,
+    monthlyTrend,
+    spentHoursRatio,
+    estimatedHoursRatio,
+    monthlySpentSharePercent,
+    monthlyEstimatedSharePercent,
+    monthlySpentHoursTrend,
+    monthlyEstimatedHoursTrend,
+    departments: store.departments,
+  });
 });
 
 export default router;

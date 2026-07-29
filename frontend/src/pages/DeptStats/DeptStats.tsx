@@ -10,6 +10,9 @@ const YEARS = ["2024", "2025", "2026", "all"];
 export default function DeptStats() {
   const navigate = useNavigate();
   const [year, setYear] = useState("all");
+  // 月度部门工时占比/趋势图后端固定按2026年切片（未选具体年份时的口径，
+  // 跟"父级部门月度提交及完成趋势"一致），这里只是决定图表标题怎么显示
+  const ratioYearLabel = year === "all" ? "2026" : year;
   const [deptIds, setDeptIds] = useState<string[]>([]);
   const [data, setData] = useState<any>(null);
   const [activeChart, setActiveChart] = useState<string | null>(null);
@@ -79,6 +82,52 @@ export default function DeptStats() {
     };
   }, [data]);
 
+  // 各部门月度工时花费占比：100%堆叠柱状图，每个月柱子总高度都是100%，
+  // 看的是部门之间的占比结构随月份如何变化，不是绝对工时数值
+  const monthlyShareOption = (series: any[]) => ({
+    tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, valueFormatter: (v: number) => `${v}%` },
+    legend: { bottom: 0 },
+    xAxis: { type: "category", data: Array.from({ length: 12 }, (_, i) => `${i + 1}月`) },
+    yAxis: { type: "value", max: 100, axisLabel: { formatter: "{value}%" } },
+    series: series.map((d) => ({
+      name: d.deptName,
+      type: "bar",
+      stack: "total",
+      data: d.values,
+    })),
+  });
+
+  const monthlySpentShareOption = useMemo(
+    () => (data ? monthlyShareOption(data.monthlySpentSharePercent) : {}),
+    [data]
+  );
+  const monthlyEstimatedShareOption = useMemo(
+    () => (data ? monthlyShareOption(data.monthlyEstimatedSharePercent) : {}),
+    [data]
+  );
+
+  // 各部门月度工时趋势：绝对工时数值（不做百分比归一），看的是逐月工时本身的涨跌
+  const monthlyTrendLineOption = (series: any[]) => ({
+    tooltip: { trigger: "axis" },
+    legend: { bottom: 0 },
+    xAxis: { type: "category", data: Array.from({ length: 12 }, (_, i) => `${i + 1}月`) },
+    yAxis: { type: "value" },
+    series: series.map((d) => ({
+      name: d.deptName,
+      type: "line",
+      data: d.values,
+    })),
+  });
+
+  const monthlySpentTrendOption = useMemo(
+    () => (data ? monthlyTrendLineOption(data.monthlySpentHoursTrend) : {}),
+    [data]
+  );
+  const monthlyEstimatedTrendOption = useMemo(
+    () => (data ? monthlyTrendLineOption(data.monthlyEstimatedHoursTrend) : {}),
+    [data]
+  );
+
   if (!data) return null;
 
   return (
@@ -141,6 +190,32 @@ export default function DeptStats() {
         <Col span={6}>
           <Card size="small" title="预估花费工时占比">
             <ReactECharts option={estPieOption} style={{ height: 240 }} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={12} style={{ marginBottom: 12 }}>
+        <Col span={12}>
+          <Card size="small" title={`各部门月度已花费实际工时占比（按${ratioYearLabel}年）`}>
+            <ReactECharts option={monthlySpentShareOption} style={{ height: 260 }} />
+          </Card>
+        </Col>
+        <Col span={12}>
+          <Card size="small" title={`各部门月度预估花费工时占比（按${ratioYearLabel}年）`}>
+            <ReactECharts option={monthlyEstimatedShareOption} style={{ height: 260 }} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={12} style={{ marginBottom: 12 }}>
+        <Col span={12}>
+          <Card size="small" title={`各部门月度已花费实际工时趋势（按${ratioYearLabel}年）`}>
+            <ReactECharts option={monthlySpentTrendOption} style={{ height: 260 }} />
+          </Card>
+        </Col>
+        <Col span={12}>
+          <Card size="small" title={`各部门月度预估花费工时趋势（按${ratioYearLabel}年）`}>
+            <ReactECharts option={monthlyEstimatedTrendOption} style={{ height: 260 }} />
           </Card>
         </Col>
       </Row>
