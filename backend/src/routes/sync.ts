@@ -448,7 +448,13 @@ router.post("/tapd/:id", async (req, res) => {
 });
 
 // 获取TAPD信息：供路由与定时任务共用；不传 filters 时默认仅覆盖未完成未关闭且有TAPD地址的数据。
-// 按条更新（每条各自调一次 TAPD 开放平台 API），单条失败只影响该条，不中断整个任务
+// 严格排队逐条执行：等上一条完全结束（无论成功失败）才开始下一条，不能并发展开——
+// 浏览器模式下每条都要起一个独立的 Chromium 实例访问 TAPD，一次性铺开会像当曲云那次一样
+// 多个浏览器实例抢同一份登录态文件互相干扰，也更容易被 TAPD 的安全网关当成批量自动化行为拦截。
+// 之前用 setInterval(async () => {...}, 400) 驱动，但 setInterval 不会等 async 回调跑完
+// 就继续按固定间隔触发下一次——只要单条耗时超过 400ms（几乎总是），后面的 tick 会在前一批
+// 还没跑完时就再取一批新的候选工单开始处理，导致实际上是大量工单同时在跑，
+// 因此改成真正的顺序循环，不再用定时器驱动
 export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; done: Promise<SyncJob> } {
   const candidates = resolveCandidates(filters).filter((t) => t.tapdUrl);
   const job: SyncJob = {
@@ -469,16 +475,13 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
     jobDoneResolver = resolve;
   });
 
-  let idx = 0;
-  stopJobTimer();
-  jobTimer = setInterval(async () => {
-    if (job.status !== "running") {
-      finishJob(job);
-      return;
-    }
-    const batch = candidates.slice(idx, idx + 5);
-    idx += 5;
-    for (const ticket of batch) {
+  stopJobTimer(); // 清掉可能还挂着的上一个任务的定时器（如"更新工单"仍在用 setInterval 驱动）
+
+  (async () => {
+    for (const ticket of candidates) {
+      // 任务被 /terminate 手动终止：不再处理剩余工单，日志已由 /terminate 那边记过
+      if (job.status !== "running") break;
+
       // 这条工单正被"点击TAPD地址"单条同步占用，本轮批量跳过，避免并发写同一个 ticket 对象
       if (ticketsSyncingTapd.has(ticket.id)) {
         job.failed += 1;
@@ -503,7 +506,8 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
       }
       job.processed += 1;
     }
-    if (idx >= candidates.length) {
+
+    if (job.status === "running") {
       job.status = "done";
       job.finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
       store.addLog({
@@ -514,9 +518,9 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
         failReason: job.failed ? job.failReasons.join("; ") : null,
         detail: `同步 TAPD 完成，成功 ${job.success} 条，失败 ${job.failed} 条`,
       });
-      finishJob(job);
     }
-  }, 400);
+    finishJob(job);
+  })();
 
   return { job, done };
 }
