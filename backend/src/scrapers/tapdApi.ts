@@ -30,6 +30,9 @@ export interface TapdSubStoryFields {
   estimatedHours: number | null;
   actualHours: number | null;
   iterationName: string | null;
+  // 产品经理：只有浏览器模式点进子需求自己的详情页才能读到（子需求页签的表格列表里没有这一列），
+  // API 模式取不到，保持 null
+  productManager: string | null;
 }
 
 export interface TapdStoryFields {
@@ -45,6 +48,9 @@ export interface TapdStoryFields {
   iterationEnd: string | null;
   // 月度计划：TAPD 上一般是自定义字段，各空间字段名不同；取不到时为空数组（保持工单原值不动）
   monthlyPlan: string[];
+  // 产品经理：目前只有子需求会用到这个值（详情页面板里读到，见 tapdScraper.ts），
+  // 主需求的产品经理走的是当曲云同步，这里放着不用，只是复用同一个"详情页字段面板"结构
+  productManager: string | null;
   // 子需求列表；null 表示本次没有尝试/没能获取子需求（保持工单原值不动），空数组表示确认没有子需求
   subStories: TapdSubStoryFields[] | null;
   // 在 TAPD 上确认为空（页面显示"-"或接口返回空值）的字段中文名。
@@ -165,6 +171,8 @@ function toSubStoryFields(story: any, workspaceId: string, statusMap: Record<str
     estimatedHours: parseHours(story.effort),
     actualHours: parseHours(story.effort_completed),
     iterationName: null, // 子需求的迭代名需要额外按 iteration_id 查询，由调用处统一补齐
+    // 产品经理在TAPD上一般是各空间自定义字段，字段名不统一，API模式暂不取；保持工单原值
+    productManager: null,
   };
 }
 
@@ -241,6 +249,8 @@ export async function fetchTapdStoryFields(tapdUrl: string): Promise<TapdStoryFi
     iterationEnd: iteration?.end ?? null,
     // 月度计划在TAPD上一般是各空间自定义字段，字段名不统一，API模式暂不取；保持工单原值
     monthlyPlan: [],
+    // 主需求的产品经理走当曲云同步，这里不用；子需求的产品经理 API 模式暂不取
+    productManager: null,
     subStories,
     emptyFields,
   };

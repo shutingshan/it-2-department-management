@@ -337,6 +337,8 @@ async function extractFieldsOnce(page: Page): Promise<TapdStoryFields | null> {
   const currentHandler = parseNameList(await findLabel("处理人", "处理人", "当前处理人"))[0] ?? null;
   const iterationName = await findLabel("迭代");
   const monthlyPlan = parseNameList(await findLabel("月度计划"));
+  // 主需求的产品经理走当曲云同步、这里不用；子需求没有单独来源，靠这里读到的值补上
+  const productManager = parseNameList(await findLabel("产品经理"))[0] ?? null;
 
   // 页面确实渲染出字段面板了就算抓到（哪怕字段值全是"-"，那也是有效结果，
   // 说明这条需求在TAPD上就是没填），不能因为"值都是空的"就当成还没加载完继续空等
@@ -349,6 +351,7 @@ async function extractFieldsOnce(page: Page): Promise<TapdStoryFields | null> {
     currentHandler ||
     iterationName ||
     monthlyPlan.length ||
+    productManager ||
     emptyFields.length;
   if (!gotAnything) return null;
   return {
@@ -363,6 +366,7 @@ async function extractFieldsOnce(page: Page): Promise<TapdStoryFields | null> {
     iterationStart: null,
     iterationEnd: null,
     monthlyPlan,
+    productManager,
     subStories: null, // 子需求列表由 listSubStoryEntries + 逐条进详情页补齐
     emptyFields,
   };
@@ -475,8 +479,9 @@ async function extractStoryDetailFields(page: Page, timeoutMs: number): Promise<
     (f.tester.length ? 1 : 0) +
     (f.currentHandler ? 1 : 0) +
     (f.iterationName ? 1 : 0) +
-    (f.monthlyPlan.length ? 1 : 0);
-  const TOTAL_FIELDS = 8;
+    (f.monthlyPlan.length ? 1 : 0) +
+    (f.productManager ? 1 : 0);
+  const TOTAL_FIELDS = 9;
   // 字段数量连续5轮（约15秒）没有再增加，就认为页面已经渲染稳定，接受当前结果
   // （部分字段在TAPD上本来就可能是空的，所以不能死等到全部抓到）
   const STABLE_ROUNDS = 5;
@@ -558,10 +563,12 @@ export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promis
         estimatedHours: parseHours(f.effort || null),
         actualHours: parseHours(f.effort_completed || null),
         iterationName: f.iteration_id || null,
+        // 产品经理不在子需求页签的表格列里，表格打底值只能先留空，靠下面点进详情页补上
+        productManager: null,
       };
 
-      // 再点进这条子需求自己的详情页，把表格里没有的字段补齐（正常情况下表格已经给全了，
-      // 这一步大多数时候不会改变结果，只是兜底）
+      // 再点进这条子需求自己的详情页，把表格里没有的字段补齐（大部分字段表格已经给全了，
+      // 这里只是兜底；但产品经理表格里完全没有，必须靠这一步才能拿到）
       try {
         if (entry.url) {
           await clickToNavigate(page, entry.url);
@@ -583,6 +590,7 @@ export async function scrapeTapdStoryFields(page: Page, tapdUrl: string): Promis
         if (detail.tester.length) sub.tester = detail.tester;
         if (detail.currentHandler) sub.currentHandler = detail.currentHandler;
         if (detail.iterationName) sub.iterationName = detail.iterationName;
+        if (detail.productManager) sub.productManager = detail.productManager;
         sub.tapdUrl = page.url();
       } catch (e) {
         // 单条子需求进详情失败不影响其余子需求与主需求字段，保留表格打底值
