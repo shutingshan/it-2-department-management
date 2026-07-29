@@ -1,23 +1,52 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, Col, Row, Select, Table, Radio } from "antd";
 import ReactECharts from "echarts-for-react";
 import { api } from "../../api/client";
 
+// 迭代筛选的"全部迭代"选项，跟真实迭代名称不会撞车
+const ALL_ITERATIONS_KEY = "__all__";
+
 export default function DevHours() {
   const [data, setData] = useState<any>(null);
-  const [iteration, setIteration] = useState<string | undefined>(undefined);
+  // 支持多选 + "全部迭代"：数组里出现 ALL_ITERATIONS_KEY 就代表不按迭代过滤
+  const [iterations, setIterations] = useState<string[]>([]);
   const [year, setYear] = useState(2026);
   const [devFilter, setDevFilter] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<"diffHours" | "completedCount">("diffHours");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const initializedRef = useRef(false);
+
+  const isAll = iterations.length === 0 || iterations.includes(ALL_ITERATIONS_KEY);
 
   useEffect(() => {
-    api.get("/stats/dev-hours", { params: { iteration, year } }).then((res) => {
-      setData(res.data);
-      if (!iteration) setIteration(res.data.currentIteration);
-    });
+    api
+      .get("/stats/dev-hours", { params: { iterations: isAll ? undefined : iterations, year } })
+      .then((res) => {
+        setData(res.data);
+        // 首次进入页面默认选中"当前迭代"（单选），之后用户自己选就不再干预
+        if (!initializedRef.current) {
+          initializedRef.current = true;
+          if (res.data.currentIteration) setIterations([res.data.currentIteration]);
+        }
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [iteration, year]);
+  }, [iterations.join(","), year]);
+
+  // "全部迭代"跟具体迭代互斥：选中"全部迭代"就清空其余选择；
+  // 已经是"全部迭代"时再多选具体迭代，则去掉"全部迭代"这个标记
+  function handleIterationsChange(vals: string[]) {
+    const hadAll = iterations.includes(ALL_ITERATIONS_KEY);
+    const hasAll = vals.includes(ALL_ITERATIONS_KEY);
+    if (vals.length === 0) {
+      setIterations([ALL_ITERATIONS_KEY]);
+    } else if (hasAll && !hadAll) {
+      setIterations([ALL_ITERATIONS_KEY]);
+    } else if (hasAll && hadAll && vals.length > 1) {
+      setIterations(vals.filter((v) => v !== ALL_ITERATIONS_KEY));
+    } else {
+      setIterations(vals);
+    }
+  }
 
   const yoyOption = useMemo(() => {
     if (!data) return {};
@@ -88,10 +117,15 @@ export default function DevHours() {
             extra={
               <Select
                 size="small"
-                value={iteration}
-                onChange={setIteration}
-                style={{ width: 160 }}
-                options={data.iterations.map((it: any) => ({ value: it.name, label: it.name }))}
+                mode="multiple"
+                value={isAll ? [ALL_ITERATIONS_KEY] : iterations}
+                onChange={handleIterationsChange}
+                style={{ minWidth: 200 }}
+                maxTagCount={1}
+                options={[
+                  { value: ALL_ITERATIONS_KEY, label: "全部迭代" },
+                  ...data.iterations.map((it: any) => ({ value: it.name, label: it.name })),
+                ]}
               />
             }
           >
