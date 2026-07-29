@@ -217,7 +217,7 @@ async function scrollToPageTop(page: Page) {
 // 那一部分行，必须反复"滚到底部再数一次行数"，直到行数连续几轮都不再增长，才能保证表格里
 // 已经渲染出全部子需求。这里只滚动表格自己的内部滚动容器，不整体滚动页面——
 // 整体滚动会把刚滚回顶部、已经进入可视区域的表格重新挤出视口，跟上面的"先滚回顶部"互相打架
-async function scrollSubStoryTableToLoadAll(page: Page, timeoutMs = 20000): Promise<number> {
+async function scrollSubStoryTableToLoadAll(page: Page, timeoutMs = 45000): Promise<number> {
   // 从某一行元素往上找最近的、真的可滚动的祖先容器（即虚拟滚动组件自己的滚动区域），
   // 只滚这个容器，不整体滚页面
   const scrollTableContainerOnce = () =>
@@ -241,12 +241,14 @@ async function scrollSubStoryTableToLoadAll(page: Page, timeoutMs = 20000): Prom
   const deadline = Date.now() + timeoutMs;
   let lastCount = await countSubStoryRows(page);
   let stableRounds = 0;
-  while (Date.now() < deadline && stableRounds < 3) {
+  // 表格是切页签后才异步挂载的：行数一直是 0 不代表"已经稳定"，只代表表格还没渲染出来，
+  // 必须先等到出现至少 1 行，才能开始用"连续几轮不再增长"判断是否已经加载完
+  while (Date.now() < deadline && (lastCount === 0 || stableRounds < 3)) {
     await scrollTableContainerOnce();
     await page.waitForTimeout(500);
     const count = await countSubStoryRows(page);
     if (count === lastCount) {
-      stableRounds += 1;
+      if (count > 0) stableRounds += 1;
     } else {
       stableRounds = 0;
       lastCount = count;
@@ -431,7 +433,12 @@ async function listSubStoryEntries(page: Page, workspaceId: string | null): Prom
         () => [] as { storyId: string; title: string; href: string; fields: Record<string, string> }[]
       );
 
-    if (rows.length === 0) return null;
+    if (rows.length === 0) {
+      // 页签数量显示不是 0，但一行都没读到：多半是表格没等到就去读了/选择器又对不上了，
+      // 记一条日志方便定位，而不是悄悄当成"没能确认"
+      console.warn(`[tapd] 子需求页签显示"${countText.trim()}"，但没能读到任何一行`);
+      return null;
+    }
 
     return rows.map((r, index) => ({
       storyId: r.storyId,
