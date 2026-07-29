@@ -7,6 +7,8 @@ import StatCard from "../../components/StatCard";
 import "./Home.css";
 
 const YEARS = ["2024", "2025", "2026", "all"];
+// 跟后端 backend/src/routes/stats.ts 里的 ALL_HANDLERS_KEY 保持一致
+const ALL_HANDLERS_KEY = "__all__";
 
 export default function Home() {
   const navigate = useNavigate();
@@ -206,7 +208,10 @@ export default function Home() {
                 size="small"
                 value={selectedHandler}
                 onChange={setSelectedHandler}
-                options={stats.handlerRatio.map((h: any) => ({ value: h.name, label: h.name }))}
+                options={[
+                  { value: ALL_HANDLERS_KEY, label: "全部数据" },
+                  ...stats.handlerRatio.map((h: any) => ({ value: h.name, label: h.name })),
+                ]}
                 style={{ width: 120 }}
               />
             }

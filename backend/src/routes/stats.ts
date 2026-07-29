@@ -13,6 +13,10 @@ function inYear(dateStr: string | null, year: number | null): boolean {
   return dayjs(dateStr).year() === year;
 }
 
+// "各受理人过去三年每月接收/完成数量对比"图表里"全部数据"选项的键名，
+// 代表不筛选具体受理人、汇总部门整体数据；前端下拉框的 value 需要跟这个字符串保持一致
+export const ALL_HANDLERS_KEY = "__all__";
+
 // ---------- 首页统计 ----------
 router.get("/home", (req, res) => {
   const yearParam = String(req.query.year ?? "2026");
@@ -63,16 +67,17 @@ router.get("/home", (req, res) => {
 
   // 各受理人过去三年每月接收/完成数量对比
   const years = [2024, 2025, 2026];
-  const monthlyTrend = Object.keys(byHandler).map((handler) => {
-    const series = years.flatMap((y) =>
+  // handler 为 null 表示不筛选具体受理人，统计部门整体（全部受理人汇总）的接收/完成数量
+  const monthlySeries = (handler: string | null) =>
+    years.flatMap((y) =>
       Array.from({ length: 12 }, (_, m) => {
-        const monthTickets = tickets.filter(
-          (t) => t.itHandler === handler && dayjs(t.submittedAt).year() === y && dayjs(t.submittedAt).month() === m
-        );
-        const received = monthTickets.length;
+        const matchHandler = (t: Ticket) => handler === null || t.itHandler === handler;
+        const received = tickets.filter(
+          (t) => matchHandler(t) && dayjs(t.submittedAt).year() === y && dayjs(t.submittedAt).month() === m
+        ).length;
         const done = tickets.filter(
           (t) =>
-            t.itHandler === handler &&
+            matchHandler(t) &&
             t.actualCompleteTime &&
             dayjs(t.actualCompleteTime).year() === y &&
             dayjs(t.actualCompleteTime).month() === m
@@ -80,8 +85,11 @@ router.get("/home", (req, res) => {
         return { year: y, month: m + 1, received, completed: done };
       })
     );
-    return { handler, series };
-  });
+  // "全部" 汇总项固定排在最前面，键名用 ALL_HANDLERS_KEY（不会跟真实受理人姓名撞车）
+  const monthlyTrend = [
+    { handler: ALL_HANDLERS_KEY, series: monthlySeries(null) },
+    ...Object.keys(byHandler).map((handler) => ({ handler, series: monthlySeries(handler) })),
+  ];
 
   // 梳理及完成进度：默认当前年当前月
   const progressYear = Number(req.query.progressYear ?? 2026);
