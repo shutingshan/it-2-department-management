@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Dropdown, Input, Pagination, Space, Spin, Table, Tag, Tooltip, Typography, message } from "antd";
+import { Button, Dropdown, Input, Pagination, Popover, Space, Spin, Table, Tag, Typography, message } from "antd";
 import { CopyOutlined, ExportOutlined } from "@ant-design/icons";
 import type { ColumnsType, ColumnType } from "antd/es/table";
 import {
@@ -55,6 +55,7 @@ const DEFAULT_MIDDLE_ORDER = [
 ];
 
 const ORDER_STORAGE_KEY = "tc-column-order";
+const WIDTH_STORAGE_KEY = "tc-column-widths";
 
 function loadColumnOrder(): string[] {
   try {
@@ -70,6 +71,17 @@ function loadColumnOrder(): string[] {
     // 忽略损坏的本地存储数据
   }
   return DEFAULT_MIDDLE_ORDER;
+}
+
+// 用户手动拖拽调整过的列宽，按列 key 存；没调整过的列不在这里，用 columnDefs 里的默认宽度
+function loadColumnWidths(): Record<string, number> {
+  try {
+    const saved = JSON.parse(localStorage.getItem(WIDTH_STORAGE_KEY) ?? "null");
+    if (saved && typeof saved === "object" && !Array.isArray(saved)) return saved;
+  } catch {
+    // 忽略损坏的本地存储数据
+  }
+  return {};
 }
 
 // 紧急是文本字段（可填"紧急"/"急"等），不是开关
@@ -154,6 +166,19 @@ function InlineRemarkInput({ ticket, onSaved }: { ticket: Ticket; onSaved: () =>
   );
 }
 
+// 标题/内容这类长文本列：单元格本身省略号截断，点击后在下方弹出完整内容，而不是靠悬停
+function ExpandableCell({ text }: { text: string }) {
+  return (
+    <Popover
+      trigger="click"
+      placement="bottom"
+      content={<div className="tc-expandable-popover-content">{text || "-"}</div>}
+    >
+      <span className="tc-expandable-cell">{text}</span>
+    </Popover>
+  );
+}
+
 // 点击TAPD列地址：正常打开TAPD需求详情页的同时，触发一次只针对这一条工单的TAPD字段同步
 function TapdLinkCell({ ticket, onSynced }: { ticket: Ticket; onSynced: () => void }) {
   const { user } = useAuthStore();
@@ -216,6 +241,7 @@ export default function TicketCenter() {
   const [subTicketsFor, setSubTicketsFor] = useState<Ticket | null>(null);
   const [lastUpdateTime, setLastUpdateTime] = useState("");
   const [columnOrder, setColumnOrder] = useState<string[]>(loadColumnOrder);
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(loadColumnWidths);
 
   // 表格高度不能写死：统计卡片、筛选栏（选中条件多时会换行）的高度都是变的。
   // 这里实测表格容器剩余的可用高度，减掉表头后作为表体的滚动高度，
@@ -241,6 +267,14 @@ export default function TicketCenter() {
   useEffect(() => {
     localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(columnOrder));
   }, [columnOrder]);
+
+  useEffect(() => {
+    localStorage.setItem(WIDTH_STORAGE_KEY, JSON.stringify(columnWidths));
+  }, [columnWidths]);
+
+  function handleColumnResize(key: string, width: number) {
+    setColumnWidths((w) => ({ ...w, [key]: width }));
+  }
 
   // 支持从头部"我负责的工单"等入口重复导航到 /tickets 时，也能重新应用筛选条件
   useEffect(() => {
@@ -329,22 +363,14 @@ export default function TicketCenter() {
         dataIndex: "title",
         width: 220,
         ellipsis: { showTitle: false },
-        render: (title: string) => (
-          <Tooltip title={title}>
-            <span>{title}</span>
-          </Tooltip>
-        ),
+        render: (title: string) => <ExpandableCell text={title} />,
       },
       content: {
         title: "内容",
         dataIndex: "content",
         width: 260,
         ellipsis: { showTitle: false },
-        render: (content: string) => (
-          <Tooltip title={content}>
-            <span>{content}</span>
-          </Tooltip>
-        ),
+        render: (content: string) => <ExpandableCell text={content} />,
       },
       category: { title: "分类", dataIndex: "category", width: 90 },
       requesterDept: { title: "发起部门", dataIndex: "requesterDept", width: 110, ellipsis: true },
@@ -446,12 +472,24 @@ export default function TicketCenter() {
         </Space>
       ),
     },
-  ].map((col: any) => ({
-    ...col,
-    onHeaderCell: (column: any) => ({
-      columnKey: FIXED_LEFT_KEYS.includes(column.key) || column.key === "actions" ? undefined : column.key,
-    }),
-  })) as ColumnsType<Ticket>;
+  ].map((col: any) => {
+    const width = columnWidths[col.key] ?? col.width;
+    return {
+      ...col,
+      width,
+      onHeaderCell: (column: any) => ({
+        // 列顺序拖拽仅对中间可调序的列开放，固定列/操作列不可拖拽排序；
+        // 列宽拖拽则所有列都开放，两者是独立的两回事
+        columnKey: FIXED_LEFT_KEYS.includes(column.key) || column.key === "actions" ? undefined : column.key,
+        resizeKey: column.key,
+        width,
+        onResize: handleColumnResize,
+      }),
+    };
+  }) as ColumnsType<Ticket>;
+
+  // 横向滚动总宽度按当前各列实际宽度算，而不是写死一个数——不然列宽调整后横向滚动范围会跟视觉不一致
+  const scrollX = columns.reduce((sum, col: any) => sum + (typeof col.width === "number" ? col.width : 100), 0);
 
   return (
     <div className="ticket-center-page">
@@ -504,7 +542,7 @@ export default function TicketCenter() {
               columns={columns}
               pagination={false}
               sticky
-              scroll={{ x: 2600, y: tableScrollY }}
+              scroll={{ x: scrollX, y: tableScrollY }}
               rowClassName={(r) => (r.urgent.trim() ? "row-urgent" : "")}
               components={{ header: { cell: DraggableHeaderCell } }}
               onChange={(_, __, sorter: any) => {
