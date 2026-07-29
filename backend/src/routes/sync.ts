@@ -348,7 +348,7 @@ function applyTapdFields(ticket: Ticket, fields: TapdStoryFields) {
       code: s.storyId,
       tapdUrl: s.tapdUrl,
       title: s.title,
-      productManager: "",
+      productManager: s.productManager ?? "",
       developer: s.developer.join("、"),
       tester: s.tester.join("、"),
       currentHandler: s.currentHandler ?? "",
