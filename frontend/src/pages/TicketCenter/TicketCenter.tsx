@@ -31,8 +31,8 @@ const FIXED_LEFT_KEYS = ["code", "tapdUrl", "owningApp", "requester", "title"];
 const DEFAULT_MIDDLE_ORDER = [
   "content",
   "category",
-  "module",
   "requesterDept",
+  "watcher",
   "currentHandler",
   "itHandler",
   "developer",
@@ -347,8 +347,14 @@ export default function TicketCenter() {
         ),
       },
       category: { title: "分类", dataIndex: "category", width: 90 },
-      module: { title: "模块", dataIndex: "module", width: 100, ellipsis: true },
       requesterDept: { title: "发起部门", dataIndex: "requesterDept", width: 110, ellipsis: true },
+      watcher: {
+        title: "关注人",
+        dataIndex: "watcher",
+        width: 130,
+        ellipsis: true,
+        render: (v: string[]) => v.join("、") || "-",
+      },
       currentHandler: { title: "当前处理人", dataIndex: "currentHandler", width: 140, ellipsis: true },
       itHandler: { title: "IT受理人", dataIndex: "itHandler", width: 90 },
       developer: {
@@ -452,6 +458,7 @@ export default function TicketCenter() {
       <StatCards
         activeCardKey={filters.cardKey}
         refreshKey={refreshTick}
+        itHandlers={targets}
         onSelect={(cardKey) => {
           setFilters({ sortField: "submittedAt", sortOrder: "desc", cardKey });
           setPage(1);

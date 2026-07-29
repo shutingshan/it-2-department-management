@@ -16,17 +16,22 @@ export interface CardStat {
 export default function StatCards({
   activeCardKey,
   refreshKey,
+  itHandlers,
   onSelect,
 }: {
   activeCardKey?: string;
   refreshKey: number;
+  // "切换人员"选中的目标（可多选），传了就只统计这些人的工单，空/未传统计全部
+  itHandlers?: string[];
   onSelect: (cardKey: string) => void;
 }) {
   const [stats, setStats] = useState<CardStat[]>([]);
 
   useEffect(() => {
-    api.get("/tickets/card-stats").then((res) => setStats(res.data.data));
-  }, [refreshKey]);
+    api
+      .get("/tickets/card-stats", { params: itHandlers?.length ? { itHandler: itHandlers } : undefined })
+      .then((res) => setStats(res.data.data));
+  }, [refreshKey, itHandlers]);
 
   const topLevel = stats.filter((s) => !s.parentId);
   const childrenOf = (id: string) => stats.filter((s) => s.parentId === id);

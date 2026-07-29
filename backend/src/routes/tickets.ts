@@ -8,9 +8,14 @@ import { ChangeLogEntry } from "../types";
 
 const router = Router();
 
-// 工单中心统计卡片数据，需在 "/:id" 之前注册，避免被当成 id 参数捕获
+// 工单中心统计卡片数据，需在 "/:id" 之前注册，避免被当成 id 参数捕获。
+// 支持按 itHandler 圈定范围（"切换人员"选中目标后，卡片数量也要跟着只统计这些人的工单，
+// 不传时统计全部工单）——只认 itHandler 这一个维度，不跟列表当前的其余筛选条件联动，
+// 跟"我负责的工单"/"切换人员"的既有语义保持一致
 router.get("/card-stats", (req, res) => {
-  res.json({ data: computeCardStats(store.tickets) });
+  const { itHandler } = parseQuery(req.query as Record<string, unknown>);
+  const tickets = itHandler?.length ? store.tickets.filter((t) => itHandler.includes(t.itHandler)) : store.tickets;
+  res.json({ data: computeCardStats(tickets) });
 });
 
 // 真实工单数据里出现过的 IT 受理人（去重排序），供"切换人员"等入口使用。
