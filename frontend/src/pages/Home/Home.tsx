@@ -30,16 +30,22 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, progressYear, progressMonth]);
 
+  // 图例项一多（尤其受理人可能有十几个），底部图例换行后容易跟饼图本身或换行后的
+  // 图例互相压在一起。改成可滚动的单行图例（超出宽度就分页，鼠标滚轮/箭头翻页），
+  // 不再自动换行，同时把饼图整体往上收一点、留出图例的位置
+  const pieLegend = { bottom: 0, type: "scroll" as const, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11 } };
+
   const stageOption = useMemo(() => {
     if (!stats) return {};
     return {
       tooltip: { trigger: "item" },
-      legend: { bottom: 0 },
+      legend: pieLegend,
       series: [
         {
           name: "工单阶段占比",
           type: "pie",
-          radius: ["40%", "70%"],
+          radius: ["35%", "60%"],
+          center: ["50%", "42%"],
           data: stats.stageRatio.map((s: any) => ({ name: s.stage, value: s.value })),
           label: { formatter: "{b}: {c}" },
         },
@@ -51,12 +57,13 @@ export default function Home() {
     if (!stats) return {};
     return {
       tooltip: { trigger: "item" },
-      legend: { bottom: 0 },
+      legend: pieLegend,
       series: [
         {
           name: "受理人工单占比",
           type: "pie",
-          radius: ["40%", "70%"],
+          radius: ["35%", "60%"],
+          center: ["50%", "42%"],
           data: stats.handlerRatio.map((s: any) => ({ name: s.name, value: s.value })),
           label: { formatter: "{b}: {c}" },
         },
