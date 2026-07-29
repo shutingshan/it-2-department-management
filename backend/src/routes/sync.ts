@@ -1,7 +1,7 @@
 import { Router } from "express";
 import dayjs from "dayjs";
 import { store } from "../store";
-import { dedupe, resolveStage, stripCurrentIterationTag } from "../mapping";
+import { dedupe, resolveStage } from "../mapping";
 import { SyncJob } from "../store";
 import { ScrapedRow, scrapeDangquyunTicketList } from "../scrapers/dangquyunScraper";
 import { mapScrapedRowToTicket } from "../scrapers/dangquyunMapper";
@@ -340,23 +340,19 @@ function applyTapdFields(ticket: Ticket, fields: TapdStoryFields) {
   if (fields.currentHandler) ticket.currentHandler = fields.currentHandler;
   else if (isEmptyOnTapd("处理人")) ticket.currentHandler = "";
 
-  // 迭代：按名称去重合并进已有列表（历史迭代保留），当前迭代不存在时追加；
+  // 迭代：TAPD 当前迭代是什么就是什么，直接替换成最新值（不再跟旧值合并保留历史）；
   // TAPD 上确认没有迭代时清空（会连带让工单阶段回落到"待排期"，这是预期行为）
   if (fields.iterationName) {
-    const name = fields.iterationName;
-    const exists = ticket.iterations.some(
-      (i) => stripCurrentIterationTag(i.name) === stripCurrentIterationTag(name)
-    );
-    if (!exists) {
-      ticket.iterations.push({ name, start: fields.iterationStart ?? "", end: fields.iterationEnd ?? "" });
-    }
+    ticket.iterations = [
+      { name: fields.iterationName, start: fields.iterationStart ?? "", end: fields.iterationEnd ?? "" },
+    ];
   } else if (isEmptyOnTapd("迭代")) {
     ticket.iterations = [];
   }
 
-  // 月度计划：去重合并
+  // 月度计划：同样直接替换成 TAPD 最新值，不再跟旧值合并
   if (fields.monthlyPlan.length) {
-    ticket.monthlyPlan = dedupe([...ticket.monthlyPlan, ...fields.monthlyPlan]);
+    ticket.monthlyPlan = dedupe(fields.monthlyPlan);
   } else if (isEmptyOnTapd("月度计划")) {
     ticket.monthlyPlan = [];
   }
@@ -378,6 +374,25 @@ function applyTapdFields(ticket: Ticket, fields: TapdStoryFields) {
       estimatedHours: s.estimatedHours ?? 0,
       actualHours: s.actualHours ?? 0,
     }));
+
+    // 有子需求时，父需求的开发人员/当前处理人/迭代/实际工时改由子需求汇总得出，
+    // 不再采信父需求自己 TAPD 页面上的这几个字段——这是最早原型阶段模拟数据生成规则
+    // 就定好的口径（backend/src/seed.ts 的 hasSubTickets 分支），这次把它接到真实同步逻辑上。
+    // 月度计划、预估工时不在这份汇总里：子需求目前没有月度计划的真实取数来源（TAPD子需求页签
+    // 表格里没有这一列），预估工时沿用原型口径（子需求预估工时不汇总进父需求）
+    if (fields.subStories.length > 0) {
+      ticket.developer = dedupe(fields.subStories.flatMap((s) => s.developer));
+      ticket.currentHandler = fields.subStories
+        .map((s) => s.currentHandler)
+        .filter((h): h is string => !!h)
+        .join("、");
+      ticket.iterations = fields.subStories
+        .filter((s) => s.iterationName)
+        .map((s) => ({ name: s.iterationName as string, start: "", end: "" }));
+      ticket.actualHours = Number(
+        fields.subStories.reduce((sum, s) => sum + (s.actualHours ?? 0), 0).toFixed(1)
+      );
+    }
   }
 
   const newStage = resolveStage(ticket.status, ticket.devStatus, ticket.iterations);
