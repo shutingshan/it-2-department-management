@@ -30,6 +30,13 @@ router.get("/flat", (_req, res) => {
   res.json({ data: store.departments });
 });
 
+// 部门名称候选：工单发起部门（当曲云原样抓来的部门名称文本）里出现过的所有值去重，
+// 供"新增部门"时选择，让部门树里维护的名称能跟真实工单数据对上
+router.get("/requester-dept-options", (_req, res) => {
+  const names = Array.from(new Set(store.tickets.map((t) => t.requesterDept).filter((v) => v && v.trim()))).sort();
+  res.json({ data: names });
+});
+
 function findChildConflicts(childIds: string[], selfId: string | null) {
   return childIds
     .map((cid) => store.departments.find((d) => d.id === cid))
