@@ -110,6 +110,13 @@ export async function runFetchNew(actor: string, mode?: "incremental" | "full") 
     // 增量模式：按"编号"跟工单中心现有数据比对，只新增工单中心里还没有的；
     // 全量模式（用于数据初始化）：已存在的工单也会用当曲云最新数据覆盖已同步字段
     const result = await scrapeDangquyunTicketList();
+    if (result.strategy === "none") {
+      // 地址对了，但三种表格结构都没识别出来（页面改版/选择器失效等）：不能当成"0条新工单"，
+      // 否则会跟"这次确实没有新工单"混为一谈，误导使用者以为抓取正常
+      throw new Error(
+        "未能识别当曲云工单列表页面结构，本次抓取判定无效（截图/HTML已保存到 backend/.auth/debug/）"
+      );
+    }
     const { addedCount, updatedCount, failedCount, failReasons } = applyScrapedRows(result.rows, isFull);
 
     const finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
@@ -218,6 +225,10 @@ export function startUpdateTicketsJob(actor: string, filters?: unknown): { job: 
     let scrapeError: string | null = null;
     try {
       const result = await scrapeDangquyunTicketList();
+      if (result.strategy === "none") {
+        // 同 runFetchNew：地址对但结构没识别出来，不能当成"当曲云列表里没这些编号"处理
+        throw new Error("未能识别当曲云工单列表页面结构，本次批量更新判定无效");
+      }
       for (const row of result.rows) {
         const code = row["编号"]?.trim();
         if (code) rowsByCode.set(code, row);
