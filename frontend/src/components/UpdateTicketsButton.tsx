@@ -1,14 +1,21 @@
 import { useState } from "react";
-import { Button, Dropdown, Popover, Progress, Space, Tag, message } from "antd";
+import { AutoComplete, Button, Dropdown, Modal, Popover, Progress, Space, Tag, message } from "antd";
 import { CloudSyncOutlined, DownOutlined } from "@ant-design/icons";
 import type { MenuProps } from "antd";
+import { api } from "../api/client";
 import { useSync } from "../hooks/useSync";
+import { useAuthStore } from "../store/auth";
 import { useFilteredTicketsStore } from "../store/filteredTickets";
 
 export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => void }) {
   const { job, lastUpdateTime, busy, fetchNew, updateTickets, syncTapd, terminate } = useSync(onRefresh);
+  const { user } = useAuthStore();
   const { filters } = useFilteredTicketsStore();
   const [progressOpen, setProgressOpen] = useState(false);
+  const [tapdModalOpen, setTapdModalOpen] = useState(false);
+  const [tapdCode, setTapdCode] = useState<string | undefined>(undefined);
+  const [tapdCodeOptions, setTapdCodeOptions] = useState<string[]>([]);
+  const [singleSyncing, setSingleSyncing] = useState(false);
 
   async function handleFetchNew(mode: "incremental" | "full") {
     setProgressOpen(true);
@@ -39,6 +46,37 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
       await syncTapd(filters);
     } catch (e: any) {
       message.error(e?.response?.data?.message ?? "获取TAPD信息失败");
+    }
+  }
+
+  function openTapdModal() {
+    setTapdCode(undefined);
+    setTapdModalOpen(true);
+    api.get("/tickets/codes").then((res) => setTapdCodeOptions(res.data.data));
+  }
+
+  // 弹窗里录入了工单编号：只获取这一条工单的TAPD信息；不录入：按当前筛选批量获取（原有逻辑）
+  async function handleTapdModalOk() {
+    const code = tapdCode?.trim();
+    setTapdModalOpen(false);
+    if (!code) {
+      await handleTapd();
+      return;
+    }
+    setSingleSyncing(true);
+    try {
+      const res = await api.post(`/sync/tapd/${encodeURIComponent(code)}`, { actor: user?.name });
+      const missing: string[] = res.data?.missingFields ?? [];
+      if (missing.length) {
+        message.warning(`工单 ${code} 已同步，但未获取到：${missing.join("、")}`, 6);
+      } else {
+        message.success(`工单 ${code} 的TAPD信息已同步`);
+      }
+      onRefresh();
+    } catch (e: any) {
+      message.error(e?.response?.data?.message ?? "获取TAPD信息失败");
+    } finally {
+      setSingleSyncing(false);
     }
   }
 
@@ -90,7 +128,7 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
     </div>
   );
 
-  const jobRunning = busy || job?.status === "running";
+  const jobRunning = busy || job?.status === "running" || singleSyncing;
   const items: MenuProps["items"] = [
     { key: "fetch-incremental", label: "获取新工单", disabled: jobRunning },
     { key: "fetch-full", label: "全量获取（用于数据初始化）", disabled: jobRunning },
@@ -103,13 +141,13 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
     if (key === "fetch-incremental") handleFetchNew("incremental");
     else if (key === "fetch-full") handleFetchNew("full");
     else if (key === "update") handleUpdate();
-    else if (key === "tapd") handleTapd();
+    else if (key === "tapd") openTapdModal();
   };
 
   return (
     <Space size={8}>
       <Dropdown menu={{ items, onClick: onMenuClick }} trigger={["click"]}>
-        <Button icon={<CloudSyncOutlined />} loading={busy}>
+        <Button icon={<CloudSyncOutlined />} loading={busy || singleSyncing}>
           更新工单 <DownOutlined />
         </Button>
       </Dropdown>
@@ -129,6 +167,26 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
           </Tag>
         </Popover>
       )}
+
+      <Modal
+        title="获取TAPD信息"
+        open={tapdModalOpen}
+        onCancel={() => setTapdModalOpen(false)}
+        onOk={handleTapdModalOk}
+        okText="确定"
+        cancelText="取消"
+      >
+        <div style={{ marginBottom: 8 }}>工单编号（可选，不填则按当前筛选条件批量获取）</div>
+        <AutoComplete
+          style={{ width: "100%" }}
+          value={tapdCode}
+          onChange={setTapdCode}
+          options={tapdCodeOptions.map((c) => ({ value: c }))}
+          placeholder="可输入或选择工单编号，只获取这一条；留空则批量获取"
+          allowClear
+          filterOption={(input, option) => (option?.value as string)?.toLowerCase().includes(input.toLowerCase())}
+        />
+      </Modal>
     </Space>
   );
 }

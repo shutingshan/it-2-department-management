@@ -1,12 +1,14 @@
 import { Router } from "express";
 import dayjs from "dayjs";
+import type { Browser, Page } from "playwright";
 import { store } from "../store";
 import { dedupe, resolveStage } from "../mapping";
 import { SyncJob } from "../store";
 import { ScrapedRow, scrapeDangquyunTicketList } from "../scrapers/dangquyunScraper";
 import { mapScrapedRowToTicket } from "../scrapers/dangquyunMapper";
 import { fetchTapdStoryFields, TapdStoryFields } from "../scrapers/tapdApi";
-import { scrapeTapdStoryFieldsViaBrowser } from "../scrapers/tapdScraper";
+import { scrapeTapdStoryFields, scrapeTapdStoryFieldsViaBrowser } from "../scrapers/tapdScraper";
+import { getTapdAuthenticatedContext, launchTapdBrowser } from "../scrapers/tapdAuth";
 import { config } from "../config";
 import { applyFilters, parseQuery, TicketQuery } from "../filter";
 import { Ticket } from "../types";
@@ -382,10 +384,9 @@ function applyTapdFields(ticket: Ticket, fields: TapdStoryFields) {
     // 表格里没有这一列），预估工时沿用原型口径（子需求预估工时不汇总进父需求）
     if (fields.subStories.length > 0) {
       ticket.developer = dedupe(fields.subStories.flatMap((s) => s.developer));
-      ticket.currentHandler = fields.subStories
-        .map((s) => s.currentHandler)
-        .filter((h): h is string => !!h)
-        .join("、");
+      ticket.currentHandler = dedupe(
+        fields.subStories.map((s) => s.currentHandler).filter((h): h is string => !!h)
+      ).join("、");
       ticket.iterations = fields.subStories
         .filter((s) => s.iterationName)
         .map((s) => ({ name: s.iterationName as string, start: "", end: "" }));
@@ -482,10 +483,26 @@ router.post("/tapd/:id", async (req, res) => {
   }
 });
 
+// 浏览器模式下批量任务复用的浏览器/已登录页面：整个批量任务共用同一个 Chromium 实例，
+// 逐条工单在同一个页面上"导航到该工单详情页 -> 抓字段"，而不是每条工单都重新起一次浏览器、
+// 重新做一遍登录态校验——量大的时候（上百条工单）光是反复启/停浏览器的开销就能占掉大半时间。
+// 仍然保持严格顺序执行，同一时刻只有一个浏览器窗口在跑，跟之前的反风控顾虑没有冲突，
+// 只是省掉"每条都重开一次浏览器"这一层固定开销
+async function launchSharedTapdSession(): Promise<{ browser: Browser; page: Page } | null> {
+  try {
+    const browser = await launchTapdBrowser();
+    const { page } = await getTapdAuthenticatedContext(browser);
+    return { browser, page };
+  } catch (e) {
+    console.warn("[tapd] 批量任务复用浏览器初始化失败，本次退回逐条独立开浏览器：", (e as Error).message);
+    return null;
+  }
+}
+
 // 获取TAPD信息：供路由与定时任务共用；不传 filters 时默认仅覆盖未完成未关闭且有TAPD地址的数据。
 // 严格排队逐条执行：等上一条完全结束（无论成功失败）才开始下一条，不能并发展开——
-// 浏览器模式下每条都要起一个独立的 Chromium 实例访问 TAPD，一次性铺开会像当曲云那次一样
-// 多个浏览器实例抢同一份登录态文件互相干扰，也更容易被 TAPD 的安全网关当成批量自动化行为拦截。
+// 浏览器模式下一次性铺开多个浏览器实例会像当曲云那次一样互相抢同一份登录态文件干扰，
+// 也更容易被 TAPD 的安全网关当成批量自动化行为拦截。
 // 之前用 setInterval(async () => {...}, 400) 驱动，但 setInterval 不会等 async 回调跑完
 // 就继续按固定间隔触发下一次——只要单条耗时超过 400ms（几乎总是），后面的 tick 会在前一批
 // 还没跑完时就再取一批新的候选工单开始处理，导致实际上是大量工单同时在跑，
@@ -513,33 +530,48 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
   stopJobTimer(); // 清掉可能还挂着的上一个任务的定时器（如"更新工单"仍在用 setInterval 驱动）
 
   (async () => {
-    for (const ticket of candidates) {
-      // 任务被 /terminate 手动终止：不再处理剩余工单，日志已由 /terminate 那边记过
-      if (job.status !== "running") break;
+    let session = config.tapd.fetchMode === "browser" && candidates.length > 0 ? await launchSharedTapdSession() : null;
 
-      // 这条工单正被"点击TAPD地址"单条同步占用，本轮批量跳过，避免并发写同一个 ticket 对象
-      if (ticketsSyncingTapd.has(ticket.id)) {
-        job.failed += 1;
-        job.failReasons.push(`${ticket.code}: 该工单正在被单条同步占用，本次批量跳过`);
+    try {
+      for (const ticket of candidates) {
+        // 任务被 /terminate 手动终止：不再处理剩余工单，日志已由 /terminate 那边记过
+        if (job.status !== "running") break;
+
+        // 这条工单正被"点击TAPD地址"单条同步占用，本轮批量跳过，避免并发写同一个 ticket 对象
+        if (ticketsSyncingTapd.has(ticket.id)) {
+          job.failed += 1;
+          job.failReasons.push(`${ticket.code}: 该工单正在被单条同步占用，本次批量跳过`);
+          job.processed += 1;
+          continue;
+        }
+        ticketsSyncingTapd.add(ticket.id);
+        try {
+          const fields =
+            session && !session.page.isClosed()
+              ? await scrapeTapdStoryFields(session.page, ticket.tapdUrl!)
+              : await fetchTapdFields(ticket.tapdUrl!);
+          applyTapdFields(ticket, fields);
+          ticket.tapdErrorNote = null; // 本次同步成功，清除历史异常标记
+          job.success += 1;
+        } catch (e) {
+          const reason = (e as Error).message ?? "TAPD 同步失败";
+          job.failed += 1;
+          job.failReasons.push(`${ticket.code}: ${reason}`);
+          // 按条更新：更新失败记录到 TAPD 异常备注字段，保留时间与原因
+          ticket.tapdErrorNote = { time: dayjs().format("YYYY-MM-DD HH:mm:ss"), message: reason };
+          // 复用的页面可能因为这次失败而报废（比如窗口被意外关闭），检测到就丢弃重开一个，
+          // 避免这条工单的问题连累后面所有工单都跟着失败
+          if (session && session.page.isClosed()) {
+            await session.browser.close().catch(() => {});
+            session = await launchSharedTapdSession();
+          }
+        } finally {
+          ticketsSyncingTapd.delete(ticket.id);
+        }
         job.processed += 1;
-        continue;
       }
-      ticketsSyncingTapd.add(ticket.id);
-      try {
-        const fields = await fetchTapdFields(ticket.tapdUrl!);
-        applyTapdFields(ticket, fields);
-        ticket.tapdErrorNote = null; // 本次同步成功，清除历史异常标记
-        job.success += 1;
-      } catch (e) {
-        const reason = (e as Error).message ?? "TAPD 同步失败";
-        job.failed += 1;
-        job.failReasons.push(`${ticket.code}: ${reason}`);
-        // 按条更新：更新失败记录到 TAPD 异常备注字段，保留时间与原因
-        ticket.tapdErrorNote = { time: dayjs().format("YYYY-MM-DD HH:mm:ss"), message: reason };
-      } finally {
-        ticketsSyncingTapd.delete(ticket.id);
-      }
-      job.processed += 1;
+    } finally {
+      await session?.browser.close().catch(() => {});
     }
 
     if (job.status === "running") {
