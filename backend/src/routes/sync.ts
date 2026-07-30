@@ -49,6 +49,27 @@ router.get("/status", (req, res) => {
   res.json({ job: store.currentJob, lastUpdateTime: store.lastUpdateTime });
 });
 
+// 最保险的一道抓取校验：地址、页面结构都对，不代表抓到的一定是预期的那份工单列表
+// （比如筛选条件被重置、翻页逻辑抓到了别的视图）。挑一条工单中心这边已经是"已完成"状态的
+// 工单，检查这次抓到的当曲云列表里是否还找得到这个编号——连一条已完成的工单都对不上，
+// 说明这次数据来源可疑，宁可这次不抓，也不能拿一份可疑数据去新增/覆盖工单。
+// 挑"已完成"里最近完成的一条做验证：当曲云列表本身可能有时间范围之类的默认筛选，
+// 太久以前完成的工单不一定还留在列表里，用最近完成的能尽量避免"验证工单本来就没在列表里"
+// 这种误判；工单中心里还没有任何"已完成"的工单时没法做这个校验，直接跳过
+function verifyScrapedRowsAgainstCompletedTicket(rows: ScrapedRow[]) {
+  const completed = store.tickets.filter((t) => t.stage === "已完成");
+  if (completed.length === 0) return;
+
+  const verificationTicket = [...completed].sort((a, b) =>
+    (b.actualCompleteTime ?? b.submittedAt).localeCompare(a.actualCompleteTime ?? a.submittedAt)
+  )[0];
+
+  const scrapedCodes = new Set(rows.map((r) => r["编号"]?.trim()).filter(Boolean));
+  if (!scrapedCodes.has(verificationTicket.code)) {
+    throw new Error(`当前工单列表与要求列表不符。工单验证编号：${verificationTicket.code}`);
+  }
+}
+
 // 逐行落库：新增/覆盖更新工单中心数据，单行失败不影响其余行；抽成纯函数便于独立单测
 export function applyScrapedRows(rows: ScrapedRow[], isFull: boolean) {
   const existingByCode = new Map(store.tickets.map((t) => [t.code, t]));
@@ -117,6 +138,7 @@ export async function runFetchNew(actor: string, mode?: "incremental" | "full") 
         "未能识别当曲云工单列表页面结构，本次抓取判定无效（截图/HTML已保存到 backend/.auth/debug/）"
       );
     }
+    verifyScrapedRowsAgainstCompletedTicket(result.rows);
     const { addedCount, updatedCount, failedCount, failReasons } = applyScrapedRows(result.rows, isFull);
 
     const finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
@@ -229,6 +251,7 @@ export function startUpdateTicketsJob(actor: string, filters?: unknown): { job: 
         // 同 runFetchNew：地址对但结构没识别出来，不能当成"当曲云列表里没这些编号"处理
         throw new Error("未能识别当曲云工单列表页面结构，本次批量更新判定无效");
       }
+      verifyScrapedRowsAgainstCompletedTicket(result.rows);
       for (const row of result.rows) {
         const code = row["编号"]?.trim();
         if (code) rowsByCode.set(code, row);
