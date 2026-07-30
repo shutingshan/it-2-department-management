@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
-import { Button, Form, Input, Modal, Popconfirm, Select, Space, Tree, Typography, message } from "antd";
+import { AutoComplete, Button, Form, Modal, Popconfirm, Select, Space, Tree, Typography, message } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import { api } from "../../api/client";
@@ -21,6 +21,8 @@ interface FormValues {
 export default function DeptConfig() {
   const { user } = useAuthStore();
   const [flat, setFlat] = useState<FlatDept[]>([]);
+  // 部门名称候选：来源于工单发起部门字段里出现过的真实名称，方便新增时直接选，跟工单数据对上
+  const [deptNameOptions, setDeptNameOptions] = useState<string[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -41,6 +43,7 @@ export default function DeptConfig() {
 
   useEffect(() => {
     load();
+    api.get("/dept-config/requester-dept-options").then((res) => setDeptNameOptions(res.data.data));
   }, [load]);
 
   function openAdd() {
@@ -166,8 +169,12 @@ export default function DeptConfig() {
         width={520}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="name" label="部门名称" rules={[{ required: true, message: "请输入部门名称" }]}>
-            <Input placeholder="请输入部门名称" />
+          <Form.Item name="name" label="部门名称" rules={[{ required: true, message: "请输入或选择部门名称" }]}>
+            <AutoComplete
+              options={deptNameOptions.map((n) => ({ value: n }))}
+              placeholder="可输入，也可从工单发起部门中选择"
+              filterOption={(input, option) => (option?.value as string)?.toLowerCase().includes(input.toLowerCase())}
+            />
           </Form.Item>
           <Form.Item name="parentId" label="上级部门">
             <Select allowClear options={parentOptions} placeholder="不选则为顶级部门" showSearch filterOption={(input, option) =>
