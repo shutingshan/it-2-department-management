@@ -30,6 +30,12 @@ router.get("/it-handlers", (_req, res) => {
   res.json({ data });
 });
 
+// 工单编号候选（仅关联了TAPD地址的），供"获取TAPD信息"弹窗里按单条工单编号选择使用
+router.get("/codes", (_req, res) => {
+  const codes = dedupe(store.tickets.filter((t) => t.tapdUrl).map((t) => t.code)).sort();
+  res.json({ data: codes });
+});
+
 router.get("/", (req, res) => {
   const q = parseQuery(req.query as Record<string, unknown>);
   const { actor, actorRole } = req.query as { actor?: string; actorRole?: string };

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Dropdown, Input, Pagination, Popover, Space, Spin, Table, Tag, Typography, message } from "antd";
+import { Button, Dropdown, Input, Pagination, Popover, Space, Table, Tag, Typography, message } from "antd";
 import { CopyOutlined, ExportOutlined } from "@ant-design/icons";
 import type { ColumnsType, ColumnType } from "antd/es/table";
 import {
@@ -171,7 +171,7 @@ function ExpandableCell({ text }: { text: string }) {
   return (
     <Popover
       trigger="click"
-      placement="bottom"
+      placement="bottomLeft"
       content={<div className="tc-expandable-popover-content">{text || "-"}</div>}
     >
       <span className="tc-expandable-cell">{text}</span>
@@ -179,46 +179,16 @@ function ExpandableCell({ text }: { text: string }) {
   );
 }
 
-// 点击TAPD列地址：正常打开TAPD需求详情页的同时，触发一次只针对这一条工单的TAPD字段同步
-function TapdLinkCell({ ticket, onSynced }: { ticket: Ticket; onSynced: () => void }) {
-  const { user } = useAuthStore();
-  const [syncing, setSyncing] = useState(false);
-
-  async function handleClick() {
-    if (!user || syncing) return;
-    setSyncing(true);
-    try {
-      // 单条TAPD同步要走完整登录检查+跳转列表+点击跳转详情+等待内容加载一整套流程，
-      // 每一步最长都可能等到10分钟，叠加起来最坏情况能有小一个小时；用全局默认的15秒
-      // 超时的话，前端会在后端还在正常跑的时候就先放弃，用户看不到反馈、误以为没反应而
-      // 重复点击其他工单，导致后台越攒越多同时在跑的浏览器窗口
-      const res = await api.post(`/sync/tapd/${ticket.id}`, { actor: user.name }, { timeout: 3600000 });
-      const missing: string[] = res.data?.missingFields ?? [];
-      if (missing.length) {
-        // 同步流程执行成功，但部分字段没抓到——如实说清楚，避免误以为所有字段都更新了
-        message.warning(`工单 ${ticket.code} 已同步，但未获取到：${missing.join("、")}`, 6);
-      } else {
-        message.success(`工单 ${ticket.code} 的TAPD信息已同步`);
-      }
-      onSynced();
-    } catch (e: any) {
-      message.error(e?.response?.data?.message ?? "同步TAPD信息失败");
-    } finally {
-      setSyncing(false);
-    }
-  }
-
+// 点击TAPD列地址：只跳转到TAPD需求详情页，不再触发同步（同步统一走"获取TAPD信息"按钮）
+function TapdLinkCell({ ticket }: { ticket: Ticket }) {
   if (!ticket.tapdUrl) {
     return <Typography.Text type="secondary">-</Typography.Text>;
   }
 
   return (
-    <Space size={4}>
-      <a href={ticket.tapdUrl} target="_blank" rel="noreferrer" onClick={handleClick}>
-        查看
-      </a>
-      {syncing && <Spin size="small" />}
-    </Space>
+    <a href={ticket.tapdUrl} target="_blank" rel="noreferrer">
+      查看
+    </a>
   );
 }
 
@@ -354,7 +324,7 @@ export default function TicketCenter() {
         title: "TAPD",
         dataIndex: "tapdUrl",
         width: 90,
-        render: (_: string | null, r: Ticket) => <TapdLinkCell ticket={r} onSynced={reload} />,
+        render: (_: string | null, r: Ticket) => <TapdLinkCell ticket={r} />,
       },
       owningApp: { title: "归属应用", dataIndex: "owningApp", width: 110, ellipsis: true },
       requester: { title: "发起人", dataIndex: "requester", width: 90 },
