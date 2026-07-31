@@ -36,10 +36,25 @@ function parseAttachments(v: string | undefined): Attachment[] {
   return t.split(/[、,，]/).map((name) => ({ name: name.trim(), url: "#" }));
 }
 
-function parseDeveloperList(v: string | undefined): string[] {
+// 多人字段的分隔符：当曲云里顿号/逗号/分号都出现过（比如受理人筛选项里就是用分号拼接的），
+// 都当成分隔符处理；人名本身不含这些符号，多认几种不会误伤（如"王婷婷(IT)"这种带括号的也不受影响）
+function parseNameList(v: string | undefined): string[] {
   const t = emptyToNull(v);
   if (!t) return [];
-  return Array.from(new Set(t.split(/[、,，]/).map((s) => s.trim()).filter(Boolean)));
+  return Array.from(new Set(t.split(/[、,，;；]/).map((s) => s.trim()).filter(Boolean)));
+}
+
+// 当曲云列表里关注人这一列的表头文字：实际页面上确认是"关注人"，
+// "关注人员"作为不同视图/版本可能的另一种叫法一并兼容
+const WATCHER_HEADERS = ["关注人", "关注人员"];
+
+function parseWatcher(row: ScrapedRow, existing?: Ticket): string[] {
+  const header = WATCHER_HEADERS.find((h) => h in row);
+  // 抓到的这一行里压根没有这一列（当曲云列表视图没展示该列，或表头文字跟上面几种都对不上）：
+  // 保持工单原有关注人不动。不能当成"当曲云上没有关注人"直接清空——那是把"没抓到"
+  // 误当成"确实为空"，会把已有数据洗掉
+  if (!header) return existing?.watcher ?? [];
+  return parseNameList(row[header]);
 }
 
 /**
@@ -59,7 +74,7 @@ export function mapScrapedRowToTicket(row: ScrapedRow, existing?: Ticket): Ticke
   const stage = resolveStage(status, devStatus, iterations);
 
   const tapdUrl = emptyToNull(row["关联TAPD"]);
-  const developer = parseDeveloperList(row["开发人员"]);
+  const developer = parseNameList(row["开发人员"]);
   const handler = emptyToNull(row["受理人"]) ?? "";
   const expectedCompleteTime = emptyToNull(row["预计完成"]) ?? emptyToNull(row["期望完成"]);
   const actualCompleteTime = emptyToNull(row["实际完成"]);
@@ -78,7 +93,7 @@ export function mapScrapedRowToTicket(row: ScrapedRow, existing?: Ticket): Ticke
     requester: row["发起人"]?.trim() || "",
     requesterPinyin: existing?.requesterPinyin ?? "",
     requesterDept: row["所属部门"]?.trim() || "",
-    watcher: existing?.watcher ?? [],
+    watcher: parseWatcher(row, existing),
     currentHandler: developer[0] ?? handler,
     itHandler: handler,
     developer,

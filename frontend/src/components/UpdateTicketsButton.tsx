@@ -16,6 +16,9 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
   const [tapdCode, setTapdCode] = useState<string | undefined>(undefined);
   const [tapdCodeOptions, setTapdCodeOptions] = useState<string[]>([]);
   const [singleSyncing, setSingleSyncing] = useState(false);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [loginStarting, setLoginStarting] = useState(false);
+  const [loginConfirming, setLoginConfirming] = useState(false);
 
   async function handleFetchNew(mode: "incremental" | "full") {
     setProgressOpen(true);
@@ -47,6 +50,38 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
     } catch (e: any) {
       message.error(e?.response?.data?.message ?? "获取TAPD信息失败");
     }
+  }
+
+  // TAPD扫码登录：先让后端弹出浏览器窗口，用户在窗口里扫码登录完成后，回到这个弹窗点确定保存登录态
+  async function handleTapdLogin() {
+    setLoginStarting(true);
+    try {
+      // 打开窗口要先加载TAPD首页，比较慢，给足超时
+      await api.post("/sync/tapd-login/start", {}, { timeout: 600000 });
+      setLoginModalOpen(true);
+    } catch (e: any) {
+      message.error(e?.response?.data?.message ?? "打开TAPD登录窗口失败");
+    } finally {
+      setLoginStarting(false);
+    }
+  }
+
+  async function handleTapdLoginConfirm() {
+    setLoginConfirming(true);
+    try {
+      await api.post("/sync/tapd-login/confirm", { actor: user?.name });
+      setLoginModalOpen(false);
+      message.success("TAPD登录态已保存，之后同步不需要再扫码");
+    } catch (e: any) {
+      message.error(e?.response?.data?.message ?? "保存TAPD登录态失败");
+    } finally {
+      setLoginConfirming(false);
+    }
+  }
+
+  async function handleTapdLoginCancel() {
+    setLoginModalOpen(false);
+    await api.post("/sync/tapd-login/cancel", {}).catch(() => {});
   }
 
   function openTapdModal() {
@@ -134,6 +169,7 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
     { key: "fetch-full", label: "全量获取（用于数据初始化）", disabled: jobRunning },
     { key: "update", label: "更新工单（按当前筛选）", disabled: jobRunning },
     { key: "tapd", label: "获取TAPD信息（按当前筛选）", disabled: jobRunning },
+    { key: "tapd-login", label: "TAPD扫码登录", disabled: jobRunning },
     { key: "abnormal", label: "获取异常数据（需求待确认）", disabled: true },
   ];
 
@@ -142,12 +178,13 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
     else if (key === "fetch-full") handleFetchNew("full");
     else if (key === "update") handleUpdate();
     else if (key === "tapd") openTapdModal();
+    else if (key === "tapd-login") handleTapdLogin();
   };
 
   return (
     <Space size={8}>
       <Dropdown menu={{ items, onClick: onMenuClick }} trigger={["click"]}>
-        <Button icon={<CloudSyncOutlined />} loading={busy || singleSyncing}>
+        <Button icon={<CloudSyncOutlined />} loading={busy || singleSyncing || loginStarting}>
           更新工单 <DownOutlined />
         </Button>
       </Dropdown>
@@ -186,6 +223,24 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
           allowClear
           filterOption={(input, option) => (option?.value as string)?.toLowerCase().includes(input.toLowerCase())}
         />
+      </Modal>
+
+      <Modal
+        title="TAPD扫码登录"
+        open={loginModalOpen}
+        onCancel={handleTapdLoginCancel}
+        onOk={handleTapdLoginConfirm}
+        okText="我已完成登录，保存登录态"
+        cancelText="取消"
+        confirmLoading={loginConfirming}
+        maskClosable={false}
+        width={520}
+      >
+        <p>已弹出一个浏览器窗口并停在 TAPD 首页，请在那个窗口里完成登录（可能需要先点"登录"按钮才会出现二维码，再用手机扫码）。</p>
+        <p>登录成功、能看到 TAPD 工作台后，回到这里点击下方按钮保存登录态；之后的同步会直接复用，不需要再扫码。</p>
+        <p style={{ color: "#8c8c8c", fontSize: 12, marginBottom: 0 }}>
+          注意：浏览器窗口是在运行后端服务的那台机器上弹出的。超过15分钟未确认会自动关闭，需要重新发起。
+        </p>
       </Modal>
     </Space>
   );

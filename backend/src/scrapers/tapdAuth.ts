@@ -11,8 +11,9 @@
  * 但运行期间窗口会短暂出现在屏幕上（批量任务耗时较长时窗口会一直开着，单条同步很快就会自动关闭）。
  * 这也意味着 TAPD 同步只能在有真实图形界面的机器上运行（跟 `npm run tapd:login` 一样）。
  *
- * 扫码登录本身仍只能通过 `npm run tapd:login`（backend/src/scripts/tapdLogin.ts）手动跑一次，
- * 扫码后登录态保存下来，之后的自动同步才能直接复用、不需要再次扫码。
+ * 扫码登录本身仍需人工跑一次，扫码后登录态保存下来，之后的自动同步才能直接复用、不需要再次扫码。
+ * 两种入口等价：`npm run tapd:login`（backend/src/scripts/tapdLogin.ts，在终端按回车确认），
+ * 或工单中心"更新工单"菜单里的"TAPD扫码登录"（在页面上点确定确认）。
  *
  * 选择器为通用策略实现，未经真实 tapd.cn 页面验证；如与实际页面结构不符，
  * 把 backend/.auth/debug/ 下的截图/HTML 发回来，再针对性调整。
@@ -138,7 +139,7 @@ export async function getTapdAuthenticatedContext(browser: Browser): Promise<{ c
   ensureDirs();
   if (!fs.existsSync(STATE_PATH)) {
     throw new Error(
-      "TAPD 尚未登录：请在有屏幕的本机执行一次 `npm run tapd:login`，扫码登录后再重试同步。"
+      'TAPD 尚未登录：请在有屏幕的本机用"更新工单 → TAPD扫码登录"（或执行 `npm run tapd:login`）扫码登录后再重试同步。'
     );
   }
   const context = await newStealthContext(browser, STATE_PATH);
@@ -155,16 +156,48 @@ export async function getTapdAuthenticatedContext(browser: Browser): Promise<{ c
   if (await looksLoggedOut(context)) {
     await dumpDebug(context, "session-expired");
     throw new Error(
-      "TAPD 登录态已过期：请在有屏幕的本机重新执行一次 `npm run tapd:login` 扫码登录后再重试同步。"
+      'TAPD 登录态已过期：请在有屏幕的本机用"更新工单 → TAPD扫码登录"（或执行 `npm run tapd:login`）重新扫码登录后再重试同步。'
     );
   }
   return { context, page };
 }
 
-// 交互式登录（仅供 tapdLogin.ts 调用）：非无头模式打开浏览器，人工完成登录（可能需要先点"登录"
-// 按钮才会出现二维码，再扫码），由用户自己在终端按回车确认登录完成后才保存登录态并关闭浏览器——
-// 不靠选择器猜"是否已登录"，避免猜错导致浏览器在用户还没操作完就被提前关掉
-export async function performInteractiveLogin(): Promise<void> {
+// 交互式登录：非无头模式打开浏览器，人工完成登录（可能需要先点"登录"按钮才会出现二维码，
+// 再扫码），由用户自己确认登录完成后才保存登录态并关闭浏览器——不靠选择器猜"是否已登录"，
+// 避免猜错导致浏览器在用户还没操作完就被提前关掉。
+//
+// "打开浏览器"和"确认已登录"拆成两步独立调用，是为了让这个确认既能在终端按回车完成
+// （performInteractiveLogin，供 npm run tapd:login 用），也能由前端页面上点"确定"完成
+// （见 routes/sync.ts 的 /tapd-login/* 接口）。浏览器实例在两次调用之间挂在模块级变量上。
+//
+// 注意：浏览器是在"跑后端的那台机器"上弹出来的，所以页面上点确定这套流程同样只适用于
+// 后端跑在有图形界面的机器上（本机开发）；后端部署在无桌面环境的服务器上时依旧用不了
+interface PendingTapdLogin {
+  browser: Browser;
+  context: BrowserContext;
+  startedAt: number;
+  timer: NodeJS.Timeout;
+}
+
+let pendingLogin: PendingTapdLogin | null = null;
+
+// 用户点了"打开浏览器"却一直不点确定/取消时，浏览器不能无限期挂着占资源
+const LOGIN_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+
+async function closePendingLogin() {
+  if (!pendingLogin) return;
+  clearTimeout(pendingLogin.timer);
+  const { browser } = pendingLogin;
+  pendingLogin = null;
+  await browser.close().catch(() => {});
+}
+
+// 打开登录用的浏览器窗口并停在 TAPD 首页，等待调用方后续确认；已有待确认的登录流程时直接报错，
+// 避免同时弹出多个窗口、最后不知道该保存哪一个的登录态
+export async function startInteractiveLogin(): Promise<void> {
+  if (pendingLogin) {
+    throw new Error("已有一个待确认的TAPD登录流程，请先在已打开的浏览器窗口里完成登录并点击确定（或先取消）");
+  }
   ensureDirs();
   const browser = await chromium.launch({
     headless: false,
@@ -179,14 +212,56 @@ export async function performInteractiveLogin(): Promise<void> {
     await gotoAndSettle(page, config.tapd.baseUrl);
     await dumpDebug(context, "before-manual-login");
 
+    const timer = setTimeout(() => {
+      console.warn(`[tapd] 登录流程超过 ${LOGIN_IDLE_TIMEOUT_MS / 60000} 分钟未确认，自动关闭浏览器窗口`);
+      void closePendingLogin();
+    }, LOGIN_IDLE_TIMEOUT_MS);
+    // Node 进程不该仅仅因为这个定时器还挂着就不退出
+    timer.unref?.();
+
+    pendingLogin = { browser, context, startedAt: Date.now(), timer };
+  } catch (e) {
+    await browser.close().catch(() => {});
+    throw e;
+  }
+}
+
+// 确认"已经在弹出的浏览器窗口里登录好了"：保存登录态并关闭浏览器
+export async function confirmInteractiveLogin(): Promise<void> {
+  if (!pendingLogin) {
+    throw new Error("当前没有待确认的TAPD登录流程，请先重新发起扫码登录");
+  }
+  const { context } = pendingLogin;
+  await dumpDebug(context, "after-manual-login");
+  await context.storageState({ path: STATE_PATH });
+  await closePendingLogin();
+  console.log(`[tapd] 登录态已保存到 ${STATE_PATH}`);
+}
+
+// 放弃本次登录：直接关掉浏览器，不保存登录态（原有的登录态文件保持不动）
+export async function cancelInteractiveLogin(): Promise<void> {
+  await closePendingLogin();
+}
+
+export function getInteractiveLoginStatus() {
+  return {
+    pending: pendingLogin !== null,
+    startedAt: pendingLogin?.startedAt ?? null,
+    loggedIn: fs.existsSync(STATE_PATH),
+  };
+}
+
+// 终端版扫码登录（npm run tapd:login）：跟页面上那套走的是同一段逻辑，
+// 只是"确认已登录"这一步是在终端按回车而不是点页面上的按钮
+export async function performInteractiveLogin(): Promise<void> {
+  await startInteractiveLogin();
+  try {
     console.log("[tapd] 浏览器窗口已打开，请在该窗口里手动完成登录（可能需要先点击登录按钮，再扫码）。");
     await waitForEnter("[tapd] 完成登录后回到这里，按回车键继续保存登录态：");
-
-    await dumpDebug(context, "after-manual-login");
-    await context.storageState({ path: STATE_PATH });
-    console.log(`[tapd] 登录态已保存到 ${STATE_PATH}`);
-  } finally {
-    await browser.close();
+    await confirmInteractiveLogin();
+  } catch (e) {
+    await cancelInteractiveLogin();
+    throw e;
   }
 }
 
