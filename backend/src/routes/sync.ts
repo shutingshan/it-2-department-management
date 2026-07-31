@@ -8,7 +8,14 @@ import { ScrapedRow, scrapeDangquyunTicketList } from "../scrapers/dangquyunScra
 import { mapScrapedRowToTicket } from "../scrapers/dangquyunMapper";
 import { fetchTapdStoryFields, TapdStoryFields } from "../scrapers/tapdApi";
 import { scrapeTapdStoryFields, scrapeTapdStoryFieldsViaBrowser } from "../scrapers/tapdScraper";
-import { getTapdAuthenticatedContext, launchTapdBrowser } from "../scrapers/tapdAuth";
+import {
+  cancelInteractiveLogin,
+  confirmInteractiveLogin,
+  getInteractiveLoginStatus,
+  getTapdAuthenticatedContext,
+  launchTapdBrowser,
+  startInteractiveLogin,
+} from "../scrapers/tapdAuth";
 import { config } from "../config";
 import { applyFilters, parseQuery, TicketQuery } from "../filter";
 import { Ticket } from "../types";
@@ -489,6 +496,45 @@ export async function syncSingleTicketTapd(ticket: Ticket, actor: string): Promi
     ticketsSyncingTapd.delete(ticket.id);
   }
 }
+
+// TAPD 扫码登录：把原来只能在终端完成的"扫完码后按回车确认"搬到页面上。
+// start 负责弹出浏览器窗口并停在TAPD首页，用户在窗口里扫码登录完成后，再调 confirm 保存登录态。
+// 浏览器是在跑后端的这台机器上弹出来的，所以同样只适用于后端跑在有图形界面的机器上
+router.get("/tapd-login/status", (_req, res) => {
+  res.json({ data: getInteractiveLoginStatus() });
+});
+
+router.post("/tapd-login/start", async (_req, res) => {
+  try {
+    await startInteractiveLogin();
+    res.json({ data: getInteractiveLoginStatus() });
+  } catch (e) {
+    res.status(500).json({ message: (e as Error).message ?? "打开TAPD登录窗口失败" });
+  }
+});
+
+router.post("/tapd-login/confirm", async (req, res) => {
+  const { actor } = req.body as { actor?: string };
+  try {
+    await confirmInteractiveLogin();
+    store.addLog({
+      type: "同步TAPD",
+      time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
+      actor: actor ?? "未知",
+      success: true,
+      failReason: null,
+      detail: "TAPD扫码登录完成，登录态已保存",
+    });
+    res.json({ data: getInteractiveLoginStatus() });
+  } catch (e) {
+    res.status(500).json({ message: (e as Error).message ?? "保存TAPD登录态失败" });
+  }
+});
+
+router.post("/tapd-login/cancel", async (_req, res) => {
+  await cancelInteractiveLogin();
+  res.json({ data: getInteractiveLoginStatus() });
+});
 
 router.post("/tapd/:id", async (req, res) => {
   const ticket = store.getTicket(req.params.id);
