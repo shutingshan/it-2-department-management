@@ -13,8 +13,10 @@ import {
   confirmInteractiveLogin,
   getInteractiveLoginStatus,
   getTapdAuthenticatedContext,
+  hasSavedLoginState,
   launchTapdBrowser,
   startInteractiveLogin,
+  TapdLoginRequiredError,
 } from "../scrapers/tapdAuth";
 import { config } from "../config";
 import { applyFilters, parseQuery, TicketQuery } from "../filter";
@@ -497,6 +499,16 @@ export async function syncSingleTicketTapd(ticket: Ticket, actor: string): Promi
   }
 }
 
+// 浏览器模式下同步前先做一次"本地有没有登录态文件"的快速预检：没有就直接告诉前端需要登录
+// （needLogin=true），由前端弹窗引导扫码、登录完再自动重试，不用白开一趟浏览器。
+// 注意这只能查出"从没登录过"；"登录过但已过期"要真正访问一次TAPD才知道，那种情况由
+// startTapdJob / syncSingleTicketTapd 里的 TapdLoginRequiredError 兜住
+function needTapdLogin(): boolean {
+  return config.tapd.fetchMode === "browser" && !hasSavedLoginState();
+}
+
+const TAPD_LOGIN_HINT = "TAPD 尚未登录，请先完成扫码登录后再获取TAPD信息";
+
 // TAPD 扫码登录：把原来只能在终端完成的"扫完码后按回车确认"搬到页面上。
 // start 负责弹出浏览器窗口并停在TAPD首页，用户在窗口里扫码登录完成后，再调 confirm 保存登录态。
 // 浏览器是在跑后端的这台机器上弹出来的，所以同样只适用于后端跑在有图形界面的机器上
@@ -539,6 +551,9 @@ router.post("/tapd-login/cancel", async (_req, res) => {
 router.post("/tapd/:id", async (req, res) => {
   const ticket = store.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ message: "工单不存在" });
+  if (needTapdLogin()) {
+    return res.status(409).json({ needLogin: true, message: TAPD_LOGIN_HINT });
+  }
   const { actor } = req.body as { actor?: string };
   try {
     const fields = await syncSingleTicketTapd(ticket, actor ?? "未知");
@@ -559,6 +574,10 @@ router.post("/tapd/:id", async (req, res) => {
     if (fields.subStories === null) missingFields.push("子需求列表");
     res.json({ data: ticket, missingFields });
   } catch (e) {
+    // 登录态过期（预检查不出来，真正访问TAPD时才发现）：同样告诉前端需要登录，让它引导扫码后重试
+    if (e instanceof TapdLoginRequiredError) {
+      return res.status(409).json({ needLogin: true, message: e.message });
+    }
     res.status(500).json({ message: (e as Error).message ?? "同步TAPD信息失败" });
   }
 });
@@ -568,12 +587,16 @@ router.post("/tapd/:id", async (req, res) => {
 // 重新做一遍登录态校验——量大的时候（上百条工单）光是反复启/停浏览器的开销就能占掉大半时间。
 // 仍然保持严格顺序执行，同一时刻只有一个浏览器窗口在跑，跟之前的反风控顾虑没有冲突，
 // 只是省掉"每条都重开一次浏览器"这一层固定开销
+// 需要重新扫码登录时直接向上抛（由调用方整单终止任务并提示去登录），其余失败退回逐条独立开浏览器
 async function launchSharedTapdSession(): Promise<{ browser: Browser; page: Page } | null> {
+  let browser: Browser | null = null;
   try {
-    const browser = await launchTapdBrowser();
+    browser = await launchTapdBrowser();
     const { page } = await getTapdAuthenticatedContext(browser);
     return { browser, page };
   } catch (e) {
+    await browser?.close().catch(() => {});
+    if (e instanceof TapdLoginRequiredError) throw e;
     console.warn("[tapd] 批量任务复用浏览器初始化失败，本次退回逐条独立开浏览器：", (e as Error).message);
     return null;
   }
@@ -610,7 +633,29 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
   stopJobTimer(); // 清掉可能还挂着的上一个任务的定时器（如"更新工单"仍在用 setInterval 驱动）
 
   (async () => {
-    let session = config.tapd.fetchMode === "browser" && candidates.length > 0 ? await launchSharedTapdSession() : null;
+    let session: { browser: Browser; page: Page } | null = null;
+    if (config.tapd.fetchMode === "browser" && candidates.length > 0) {
+      try {
+        session = await launchSharedTapdSession();
+      } catch (e) {
+        // 登录态无效/已过期：整单终止，不逐条去撞同一个错误——否则每条工单都会失败一次，
+        // 失败原因刷满一屏，还白白开关一堆浏览器窗口
+        const reason = (e as Error).message ?? "TAPD 尚未登录";
+        job.status = "failed";
+        job.finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
+        job.failReasons.push(reason);
+        store.addLog({
+          type: "同步TAPD",
+          time: job.finishedAt,
+          actor,
+          success: false,
+          failReason: reason,
+          detail: "同步 TAPD 终止：需要重新扫码登录",
+        });
+        finishJob(job);
+        return;
+      }
+    }
 
     try {
       for (const ticket of candidates) {
@@ -674,6 +719,9 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
 
 router.post("/tapd", (req, res) => {
   const { actor, filters } = req.body as { actor: string; filters?: unknown };
+  if (needTapdLogin()) {
+    return res.status(409).json({ needLogin: true, message: TAPD_LOGIN_HINT });
+  }
   const { job } = startTapdJob(actor, filters);
   res.json({ job });
 });

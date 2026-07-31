@@ -33,6 +33,22 @@ function ensureDirs() {
   if (config.tapd.debug) fs.mkdirSync(DEBUG_DIR, { recursive: true });
 }
 
+// "需要（重新）扫码登录"跟其他抓取失败（WAF拦截、页面结构变了、网络问题等）是不同性质的问题：
+// 前者用户自己扫个码就能解决，调用方据此引导用户去登录再自动重试；后者只能报错。
+// 单独用一个错误类型标识出来，避免调用方靠匹配错误文案来区分
+export class TapdLoginRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TapdLoginRequiredError";
+  }
+}
+
+// 本地是否存过登录态文件。只是"存过"，不代表还没过期——过期只有真正访问一次TAPD才知道，
+// 所以这个函数只用于发起同步前的快速预检（连文件都没有就不用白跑一趟浏览器了）
+export function hasSavedLoginState(): boolean {
+  return fs.existsSync(STATE_PATH);
+}
+
 async function gotoAndSettle(page: Page, url: string) {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 600000 });
   const deadline = Date.now() + 600000;
@@ -138,7 +154,7 @@ async function newStealthContext(browser: Browser, storageState?: string): Promi
 export async function getTapdAuthenticatedContext(browser: Browser): Promise<{ context: BrowserContext; page: Page }> {
   ensureDirs();
   if (!fs.existsSync(STATE_PATH)) {
-    throw new Error(
+    throw new TapdLoginRequiredError(
       'TAPD 尚未登录：请在有屏幕的本机用"更新工单 → TAPD扫码登录"（或执行 `npm run tapd:login`）扫码登录后再重试同步。'
     );
   }
@@ -155,7 +171,7 @@ export async function getTapdAuthenticatedContext(browser: Browser): Promise<{ c
 
   if (await looksLoggedOut(context)) {
     await dumpDebug(context, "session-expired");
-    throw new Error(
+    throw new TapdLoginRequiredError(
       'TAPD 登录态已过期：请在有屏幕的本机用"更新工单 → TAPD扫码登录"（或执行 `npm run tapd:login`）重新扫码登录后再重试同步。'
     );
   }
