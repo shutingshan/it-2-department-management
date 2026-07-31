@@ -19,6 +19,9 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [loginStarting, setLoginStarting] = useState(false);
   const [loginConfirming, setLoginConfirming] = useState(false);
+  // 本次扫码登录是由哪次"获取TAPD信息"触发的（code 为 null 表示批量）：登录完成后自动接着跑；
+  // 为 null 表示是用户从菜单里主动发起的登录，登录完就结束、不接着获取
+  const [pendingTapdCode, setPendingTapdCode] = useState<{ code: string | null } | null>(null);
 
   async function handleFetchNew(mode: "incremental" | "full") {
     setProgressOpen(true);
@@ -43,13 +46,59 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
     }
   }
 
-  async function handleTapd() {
-    setProgressOpen(true);
-    try {
-      await syncTapd(filters);
-    } catch (e: any) {
-      message.error(e?.response?.data?.message ?? "获取TAPD信息失败");
+  // 后端在"需要扫码登录"时统一返回 409 + needLogin，跟其他失败区分开
+  const isNeedLogin = (e: any) => e?.response?.status === 409 && e?.response?.data?.needLogin;
+
+  // 真正发起获取：code 为 null 表示按当前筛选批量获取，否则只获取这一条。
+  // 需要登录时不在这里提示，返回 needLogin 交给上层决定是引导登录还是直接报错
+  async function runTapdSync(code: string | null): Promise<{ needLogin: boolean }> {
+    if (!code) {
+      setProgressOpen(true);
+      try {
+        await syncTapd(filters);
+      } catch (e: any) {
+        if (isNeedLogin(e)) return { needLogin: true };
+        message.error(e?.response?.data?.message ?? "获取TAPD信息失败");
+      }
+      return { needLogin: false };
     }
+
+    setSingleSyncing(true);
+    try {
+      // 单条同步要走完整的登录检查+跳转列表+进详情+等内容加载，可能要好几分钟，
+      // 用 client 里 15 秒的默认超时会在后端还正常跑着的时候就先放弃
+      const res = await api.post(
+        `/sync/tapd/${encodeURIComponent(code)}`,
+        { actor: user?.name },
+        { timeout: 3600000 }
+      );
+      const missing: string[] = res.data?.missingFields ?? [];
+      if (missing.length) {
+        message.warning(`工单 ${code} 已同步，但未获取到：${missing.join("、")}`, 6);
+      } else {
+        message.success(`工单 ${code} 的TAPD信息已同步`);
+      }
+      onRefresh();
+    } catch (e: any) {
+      if (isNeedLogin(e)) return { needLogin: true };
+      message.error(e?.response?.data?.message ?? "获取TAPD信息失败");
+    } finally {
+      setSingleSyncing(false);
+    }
+    return { needLogin: false };
+  }
+
+  // 获取TAPD信息的总入口：需要登录就先引导扫码登录，登录完成后自动重试本次获取；
+  // 重试时仍提示需要登录（说明并没有真的登录成功），就直接报错，不再无限引导下去
+  async function startTapdSync(code: string | null, isRetry = false) {
+    const { needLogin } = await runTapdSync(code);
+    if (!needLogin) return;
+    if (isRetry) {
+      message.error("TAPD 仍未登录，请确认已在弹出的浏览器窗口中完成扫码登录后再试");
+      return;
+    }
+    setPendingTapdCode({ code });
+    await handleTapdLogin();
   }
 
   // TAPD扫码登录：先让后端弹出浏览器窗口，用户在窗口里扫码登录完成后，回到这个弹窗点确定保存登录态
@@ -60,6 +109,7 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
       await api.post("/sync/tapd-login/start", {}, { timeout: 600000 });
       setLoginModalOpen(true);
     } catch (e: any) {
+      setPendingTapdCode(null);
       message.error(e?.response?.data?.message ?? "打开TAPD登录窗口失败");
     } finally {
       setLoginStarting(false);
@@ -72,6 +122,10 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
       await api.post("/sync/tapd-login/confirm", { actor: user?.name });
       setLoginModalOpen(false);
       message.success("TAPD登录态已保存，之后同步不需要再扫码");
+      // 这次登录是由"获取TAPD信息"触发的：登录完接着把那次获取跑起来
+      const pending = pendingTapdCode;
+      setPendingTapdCode(null);
+      if (pending) await startTapdSync(pending.code, true);
     } catch (e: any) {
       message.error(e?.response?.data?.message ?? "保存TAPD登录态失败");
     } finally {
@@ -81,6 +135,7 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
 
   async function handleTapdLoginCancel() {
     setLoginModalOpen(false);
+    setPendingTapdCode(null);
     await api.post("/sync/tapd-login/cancel", {}).catch(() => {});
   }
 
@@ -90,29 +145,11 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
     api.get("/tickets/codes").then((res) => setTapdCodeOptions(res.data.data));
   }
 
-  // 弹窗里录入了工单编号：只获取这一条工单的TAPD信息；不录入：按当前筛选批量获取（原有逻辑）
+  // 弹窗里录入了工单编号：只获取这一条工单的TAPD信息；不录入：按当前筛选批量获取
   async function handleTapdModalOk() {
-    const code = tapdCode?.trim();
+    const code = tapdCode?.trim() || null;
     setTapdModalOpen(false);
-    if (!code) {
-      await handleTapd();
-      return;
-    }
-    setSingleSyncing(true);
-    try {
-      const res = await api.post(`/sync/tapd/${encodeURIComponent(code)}`, { actor: user?.name });
-      const missing: string[] = res.data?.missingFields ?? [];
-      if (missing.length) {
-        message.warning(`工单 ${code} 已同步，但未获取到：${missing.join("、")}`, 6);
-      } else {
-        message.success(`工单 ${code} 的TAPD信息已同步`);
-      }
-      onRefresh();
-    } catch (e: any) {
-      message.error(e?.response?.data?.message ?? "获取TAPD信息失败");
-    } finally {
-      setSingleSyncing(false);
-    }
+    await startTapdSync(code);
   }
 
   const progressPercent = job && job.total > 0 ? Math.round((job.processed / job.total) * 100) : 0;
@@ -236,6 +273,12 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
         maskClosable={false}
         width={520}
       >
+        {pendingTapdCode && (
+          <p style={{ color: "#d4380d" }}>
+            检测到 TAPD 尚未登录，需要先完成扫码登录；登录成功后会自动开始
+            {pendingTapdCode.code ? `获取工单 ${pendingTapdCode.code} 的TAPD信息` : "按当前筛选获取TAPD信息"}。
+          </p>
+        )}
         <p>已弹出一个浏览器窗口并停在 TAPD 首页，请在那个窗口里完成登录（可能需要先点"登录"按钮才会出现二维码，再用手机扫码）。</p>
         <p>登录成功、能看到 TAPD 工作台后，回到这里点击下方按钮保存登录态；之后的同步会直接复用，不需要再扫码。</p>
         <p style={{ color: "#8c8c8c", fontSize: 12, marginBottom: 0 }}>
