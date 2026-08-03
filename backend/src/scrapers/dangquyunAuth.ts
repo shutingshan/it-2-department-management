@@ -168,6 +168,12 @@ async function performLogin(context: BrowserContext) {
   await context.storageState({ path: STATE_PATH });
 }
 
+// 去掉查询字符串和结尾斜杠再比较，容忍页面自己附加的无关参数/尾部斜杠差异
+// （跟 dangquyunScraper.ts 里那份保持同样口径）
+function normalizeUrl(url: string): string {
+  return url.split("?")[0].replace(/\/+$/, "");
+}
+
 export async function getAuthenticatedContext(browser: Browser): Promise<BrowserContext> {
   ensureDirs();
   const hasState = fs.existsSync(STATE_PATH);
@@ -176,7 +182,15 @@ export async function getAuthenticatedContext(browser: Browser): Promise<Browser
 
   await gotoAndSettle(page, config.dangquyun.targetUrl);
 
-  if (await looksLikeLoginPage(context)) {
+  // 登录态失效不一定表现为"跳回登录页"：实测保存的登录态过期后，当曲云是把你重定向到
+  // 首页（tabs/home）这种看着已登录的页面，此时 looksLikeLoginPage 是 false，
+  // 光靠它判断会误以为登录态还有效，接着抓下去就会因为停在错误页面而失败，而且重跑多少次
+  // 都一样（每次都复用同一份过期登录态）。所以再补一个判断：没停在目标页面同样视为登录态失效
+  const landedOnTarget = normalizeUrl(page.url()) === normalizeUrl(config.dangquyun.targetUrl);
+  if ((await looksLikeLoginPage(context)) || !landedOnTarget) {
+    if (hasState && landedOnTarget === false) {
+      console.log(`[dangquyun] 已保存的登录态疑似失效（当前停在 ${page.url()}），重新登录`);
+    }
     await performLogin(context);
     // 登录后重新跳转到目标页面
     await gotoAndSettle(page, config.dangquyun.targetUrl);
