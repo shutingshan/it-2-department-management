@@ -17,6 +17,14 @@ export interface ScrapeResult {
   rows: ScrapedRow[];
   strategy: ExtractStrategy | "none";
   pageCount: number;
+  // 任意一页的滚动加载没能确认"已全部加载"（超时退出）时为 true：
+  // 此时 rows 可能只是该页的一部分，不能用于"没抓到就等于已删除"这类判断
+  scrollIncomplete: boolean;
+}
+
+// 滚动加载完整性标记，在一次抓取的多页之间共享
+interface ScrollStat {
+  incomplete: boolean;
 }
 
 type Locatable = Page | Frame;
@@ -34,12 +42,13 @@ const PAGINATION_TIMEOUT_MS = 60000;
 // 而是直接反复尝试抓取，抓到数据或者彻底超时才停止
 async function waitForFirstPageData(
   targets: Locatable[],
-  timeoutMs: number
+  timeoutMs: number,
+  stat?: ScrollStat
 ): Promise<{ rows: ScrapedRow[]; strategy: ExtractStrategy } | null> {
   const deadline = Date.now() + timeoutMs;
   let lastAttempt: { rows: ScrapedRow[]; strategy: ExtractStrategy } | null = null;
   while (Date.now() < deadline) {
-    lastAttempt = await extractCurrentPage(targets);
+    lastAttempt = await extractCurrentPage(targets, stat);
     if (lastAttempt) return lastAttempt;
     await new Promise((r) => setTimeout(r, 1000));
   }
@@ -49,11 +58,15 @@ async function waitForFirstPageData(
 // 当曲云表格是虚拟滚动列表：一页最多 200 条，但同一时刻 DOM 里只渲染视口内的那一小部分行，
 // 必须不断把表格滚动到底部触发懒加载，直到渲染出的行数不再增长（连续几次都一样）才算真正
 // 拿到本页全部数据，否则只会抓到滚动条顶部那几十条
+// 返回值里的 stabilized 表示"是不是真的滚到不再增长才结束"：超时退出时行数可能只收了一部分，
+// 但返回的数字看起来跟正常收全没有区别。对"获取新工单"来说少抓几条下次会补上，
+// 但对清理脚本（按"当曲云列表里没有"来删除本地工单）来说，没抓全就等于误删，
+// 必须把这个区别暴露出去让调用方自己决定要不要采信
 async function scrollGridToLoadAll(
   target: Locatable,
   rowSelector: string,
-  timeoutMs = 20000
-): Promise<number> {
+  timeoutMs = 60000
+): Promise<{ count: number; stabilized: boolean }> {
   const rowLocator = target.locator(rowSelector);
   const deadline = Date.now() + timeoutMs;
   let lastCount = await rowLocator.count();
@@ -84,20 +97,31 @@ async function scrollGridToLoadAll(
       lastCount = count;
     }
   }
-  return lastCount;
+  return { count: lastCount, stabilized: stableRounds >= 3 };
 }
 
 // 当曲云（lumi 自研表格组件）的实际结构：既不是原生 table，也没有标准 ARIA role，
 // 而是每一行用 data-row-item="true" 标记、每个单元格用 data-columnitem 标记；
 // class 名带编译哈希（如 columnItemHeaderTitle___3CMa-）会变，属性选择器更稳定
-async function extractFromDangquyunGrid(target: Locatable): Promise<ScrapedRow[] | null> {
+async function extractFromDangquyunGrid(
+  target: Locatable,
+  stat?: ScrollStat
+): Promise<ScrapedRow[] | null> {
   const rowSelector = '[data-row-item="true"]';
   const rowLocator = target.locator(rowSelector);
   let rowCount = await rowLocator.count();
   if (rowCount === 0) return null;
 
   // 已经渲染出至少一行，说明表格已经挂载好了，接下来滚动到底部把本页剩余的行也加载出来
-  rowCount = await scrollGridToLoadAll(target, rowSelector);
+  const scrolled = await scrollGridToLoadAll(target, rowSelector);
+  rowCount = scrolled.count;
+  // 只要有任意一页没能滚到"行数不再增长"就整体标记为可能没抓全
+  if (!scrolled.stabilized && stat) {
+    stat.incomplete = true;
+    console.warn(
+      `[dangquyun] 本页滚动加载超时，已渲染 ${rowCount} 行但未确认是否已全部加载，本次抓取结果可能不完整`
+    );
+  }
 
   const headers = await target.locator('[class*="columnItemHeaderTitle"] [class*="titleSpanTitle"]').allTextContents();
 
@@ -163,10 +187,11 @@ async function extractFromAriaGrid(target: Locatable): Promise<ScrapedRow[] | nu
 }
 
 async function extractCurrentPage(
-  targets: Locatable[]
+  targets: Locatable[],
+  stat?: ScrollStat
 ): Promise<{ rows: ScrapedRow[]; strategy: ExtractStrategy } | null> {
   for (const target of targets) {
-    const rows = await extractFromDangquyunGrid(target).catch(() => null);
+    const rows = await extractFromDangquyunGrid(target, stat).catch(() => null);
     if (rows) return { rows, strategy: "dangqu-grid" };
   }
   for (const target of targets) {
@@ -239,7 +264,8 @@ export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
     // 所以要连同页面里所有 iframe 一起找，而不只是主页面
     const targets: Locatable[] = [page, ...page.frames()];
 
-    const firstPage = await waitForFirstPageData(targets, FIRST_PAGE_TIMEOUT_MS);
+    const scrollStat: ScrollStat = { incomplete: false };
+    const firstPage = await waitForFirstPageData(targets, FIRST_PAGE_TIMEOUT_MS, scrollStat);
     if (!firstPage) {
       // 三种常见结构在主页面和所有 iframe 里都没找到：保存现场，方便针对实际页面结构调整选择器
       fs.mkdirSync(DEBUG_DIR, { recursive: true });
@@ -261,7 +287,7 @@ export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
         `[dangquyun] 未能用通用规则识别出表格结构（${childFrameCount > 0 ? `含 ${childFrameCount} 个子 iframe` : "页面本身没有子 iframe"}），` +
           `已保存截图/HTML 到 backend/.auth/debug/${stamp}-no-table-found.*，请把这些文件发回来，我再针对实际页面结构调整抓取选择器。`
       );
-      return { rows: [], strategy: "none", pageCount: 0 };
+      return { rows: [], strategy: "none", pageCount: 0, scrollIncomplete: scrollStat.incomplete };
     }
 
     const allRows: ScrapedRow[] = [...firstPage.rows];
@@ -271,7 +297,7 @@ export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
       const moved = await goToNextPage(targets);
       if (!moved) break;
 
-      const next = await waitForFirstPageData(targets, PAGINATION_TIMEOUT_MS);
+      const next = await waitForFirstPageData(targets, PAGINATION_TIMEOUT_MS, scrollStat);
       if (!next || next.rows.length === 0) break; // 翻页后抓不到数据了，停止，避免死循环
       allRows.push(...next.rows);
       pageCount += 1;
@@ -281,7 +307,12 @@ export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
       console.warn(`[dangquyun] 翻页已达到安全上限 ${MAX_PAGES} 页，提前停止（可能实际页数更多）`);
     }
 
-    return { rows: dedupeByCode(allRows), strategy: firstPage.strategy, pageCount };
+    return {
+      rows: dedupeByCode(allRows),
+      strategy: firstPage.strategy,
+      pageCount,
+      scrollIncomplete: scrollStat.incomplete,
+    };
   } finally {
     await browser.close();
   }

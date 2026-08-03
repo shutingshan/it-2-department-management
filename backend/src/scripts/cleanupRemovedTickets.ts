@@ -63,6 +63,16 @@ async function main() {
     );
   }
 
+  // 当曲云表格是虚拟滚动：一页最多 200 条，必须滚到底才能把整页的行都渲染出来。
+  // 只要有任意一页没能确认"已滚到不再增长"（滚动加载超时），抓到的就可能只是该页的一部分，
+  // 那些没被渲染出来的工单会被误判成"当曲云已删除"而永久删掉，绝不能继续
+  if (result.scrollIncomplete) {
+    throw new Error(
+      "当曲云列表存在滚动加载未完成的页（可能没抓全），为避免把没抓到的工单误删，本次清理判定无效。" +
+        "请稍后网络状况好一些时重试。"
+    );
+  }
+
   const scrapedCodes = new Set(
     result.rows.map((r) => r["编号"]?.trim()).filter((c): c is string => !!c)
   );
