@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "scrape:dangquyun": "ts-node-dev --transpile-only --exit-child src/scripts/scrapeDangquyun.ts",
     "scrape:tapd-story": "ts-node-dev --transpile-only --exit-child src/scripts/scrapeTapdStory.ts",
-    "tapd:login": "ts-node-dev --transpile-only --exit-child src/scripts/tapdLogin.ts"
+    "tapd:login": "ts-node-dev --transpile-only --exit-child src/scripts/tapdLogin.ts",
+    "cleanup:removed": "ts-node-dev --transpile-only --exit-child src/scripts/cleanupRemovedTickets.ts"
   },
   "keywords": [],
   "author": "",

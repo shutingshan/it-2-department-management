@@ -140,5 +140,21 @@ class Store {
   }
 }
 
+// 执行不可逆的批量删除（如"清理当曲云已删除工单"）之前，把整份数据文件另存一份。
+// 误删时把这个文件改名回 store.json 就能整体回滚。返回备份文件名，失败返回 null——
+// 备份失败不该把主流程也带崩，但要让调用方知道这次没有备份
+export function backupStoreFile(): string | null {
+  try {
+    if (!fs.existsSync(DATA_FILE)) return null;
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const name = `store-backup-${stamp}.json`;
+    fs.copyFileSync(DATA_FILE, path.join(DATA_DIR, name));
+    return name;
+  } catch (e) {
+    console.error("[store] 备份数据文件失败：", (e as Error).message);
+    return null;
+  }
+}
+
 export const store = new Store();
 export type { SyncJob };
