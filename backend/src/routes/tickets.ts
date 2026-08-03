@@ -1,6 +1,6 @@
 import { Router } from "express";
 import dayjs from "dayjs";
-import { store } from "../store";
+import { backupStoreFile, store } from "../store";
 import { applyFilters, canViewTicket, parseQuery, scopeForActor } from "../filter";
 import { dedupe, stripCurrentIterationTag } from "../mapping";
 import { computeCardStats } from "../cards";
@@ -168,6 +168,47 @@ router.post("/:id/transfer", (req, res) => {
     },
   ]);
   res.json({ data: ticket });
+});
+
+// 批量删除工单：勾选列表里的数据后手动删除。仅管理员可操作。
+// 删除前把整份数据备份一次，误删可以整体回滚（backend/data/store-backup-<时间>.json）
+router.post("/bulk-delete", (req, res) => {
+  const { ids, actor, actorRole } = req.body as {
+    ids?: string[];
+    actor?: string;
+    actorRole?: string;
+  };
+  if (actorRole !== "admin") {
+    return res.status(403).json({ message: "仅管理员可以删除工单" });
+  }
+  if (!ids?.length) {
+    return res.status(400).json({ message: "请先勾选要删除的工单" });
+  }
+
+  const target = new Set(ids);
+  const matched = store.tickets.filter((t) => target.has(t.id));
+  if (matched.length === 0) {
+    return res.status(404).json({ message: "勾选的工单都不存在，可能已被删除" });
+  }
+
+  const backupFile = backupStoreFile();
+  store.tickets = store.tickets.filter((t) => !target.has(t.id));
+  store.save();
+
+  const codes = matched.map((t) => t.code);
+  store.addLog({
+    type: "更新工单",
+    time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
+    actor: actor ?? "未知",
+    success: true,
+    failReason: null,
+    detail:
+      `手动删除工单 ${matched.length} 条：${codes.slice(0, 20).join("、")}` +
+      `${codes.length > 20 ? ` 等${codes.length}条` : ""}` +
+      `${backupFile ? `（删除前已备份到 ${backupFile}）` : ""}`,
+  });
+
+  res.json({ deletedCount: matched.length, codes, backupFile });
 });
 
 export default router;

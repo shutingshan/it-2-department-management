@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Dropdown, Input, Pagination, Popover, Space, Table, Tag, Typography, message } from "antd";
-import { CopyOutlined, ExportOutlined } from "@ant-design/icons";
+import { Button, Dropdown, Input, Pagination, Popconfirm, Popover, Space, Table, Tag, Typography, message } from "antd";
+import { CopyOutlined, DeleteOutlined, ExportOutlined } from "@ant-design/icons";
 import type { ColumnsType, ColumnType } from "antd/es/table";
 import {
   DndContext,
@@ -212,6 +212,9 @@ export default function TicketCenter() {
   const [lastUpdateTime, setLastUpdateTime] = useState("");
   const [columnOrder, setColumnOrder] = useState<string[]>(loadColumnOrder);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(loadColumnWidths);
+  // 手动删除：勾选的工单 id，以及删除请求进行中的标记
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  const [deleting, setDeleting] = useState(false);
 
   // 表格高度不能写死：统计卡片、筛选栏（选中条件多时会换行）的高度都是变的。
   // 这里实测表格容器剩余的可用高度，减掉表头后作为表体的滚动高度，
@@ -273,10 +276,36 @@ export default function TicketCenter() {
   }, [refreshTick]);
 
   const { data, total, facets, loading, reload } = useTickets(filters, page, pageSize, refreshTick);
+  const { user } = useAuthStore();
 
   function openDetail(id: string) {
     setActiveTicketId(id);
     setDetailOpen(true);
+  }
+
+  // 手动删除工单：勾选后删除，仅管理员可见可用。删除是不可逆的，
+  // 后端会在删之前把整份数据备份一次，误删可以整体回滚
+  async function handleBulkDelete() {
+    if (!user || selectedRowKeys.length === 0) return;
+    setDeleting(true);
+    try {
+      const res = await api.post("/tickets/bulk-delete", {
+        ids: selectedRowKeys,
+        actor: user.name,
+        actorRole: user.role,
+      });
+      message.success(
+        `已删除 ${res.data.deletedCount} 条工单` +
+          (res.data.backupFile ? `，删除前已备份到 backend/data/${res.data.backupFile}` : ""),
+        8
+      );
+      setSelectedRowKeys([]);
+      reload();
+    } catch (e: any) {
+      message.error(e?.response?.data?.message ?? "删除工单失败");
+    } finally {
+      setDeleting(false);
+    }
   }
 
   // groupBy：requester=按发起人（原有逻辑），itHandler=按IT受理人
@@ -478,20 +507,36 @@ export default function TicketCenter() {
         onChange={setFilters}
         facets={facets}
         extra={
-          <Dropdown
-            menu={{
-              items: [
-                { key: "requester", label: "按发起人导出" },
-                { key: "itHandler", label: "按IT受理人导出" },
-              ],
-              onClick: ({ key }) => handleExport(key as "requester" | "itHandler"),
-            }}
-            trigger={["click"]}
-          >
-            <Button size="small" icon={<ExportOutlined />}>
-              导出
-            </Button>
-          </Dropdown>
+          <Space size={8}>
+            <Dropdown
+              menu={{
+                items: [
+                  { key: "requester", label: "按发起人导出" },
+                  { key: "itHandler", label: "按IT受理人导出" },
+                ],
+                onClick: ({ key }) => handleExport(key as "requester" | "itHandler"),
+              }}
+              trigger={["click"]}
+            >
+              <Button size="small" icon={<ExportOutlined />}>
+                导出
+              </Button>
+            </Dropdown>
+            {user?.role === "admin" && selectedRowKeys.length > 0 && (
+              <Popconfirm
+                title={`确认删除选中的 ${selectedRowKeys.length} 条工单？`}
+                description="删除不可撤销，删除前会自动备份整份数据以便回滚"
+                okText="确认删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                onConfirm={handleBulkDelete}
+              >
+                <Button size="small" danger icon={<DeleteOutlined />} loading={deleting}>
+                  删除选中 {selectedRowKeys.length}
+                </Button>
+              </Popconfirm>
+            )}
+          </Space>
         }
         rightExtra={
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -511,6 +556,16 @@ export default function TicketCenter() {
               dataSource={data}
               columns={columns}
               pagination={false}
+              // 勾选后可手动删除，仅管理员需要这个能力，其余角色不显示勾选框
+              rowSelection={
+                user?.role === "admin"
+                  ? {
+                      fixed: true,
+                      selectedRowKeys,
+                      onChange: (keys) => setSelectedRowKeys(keys as string[]),
+                    }
+                  : undefined
+              }
               sticky
               scroll={{ x: scrollX, y: tableScrollY }}
               rowClassName={(r) => (r.urgent.trim() ? "row-urgent" : "")}
