@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { v4 as uuid } from "uuid";
 import { DEPARTMENTS, USERS, generateAccounts } from "./seed";
-import { Account, ChangeLogEntry, InSiteMessage, LogEntry, Ticket } from "./types";
+import { Account, ChangeLogEntry, Department, InSiteMessage, LogEntry, Ticket } from "./types";
 
 // 工单/处理记录/站内信/同步日志是真实业务数据（不是每次启动都重新生成的模拟数据），
 // 必须落盘持久化，否则进程一重启（比如 ts-node-dev 检测到文件变化自动重启）就会全部丢失。
@@ -16,6 +16,12 @@ interface PersistedState {
   logs: LogEntry[];
   lastUpdateTime: string;
   lastScheduledSyncDate: string | null;
+  // 部门树与登录账号在页面上可以增删改（部门配置 / 账号管理），改完同样要落盘——
+  // 否则进程一重启就回到 seed.ts 里的初始值，用户在页面上配了半天等于白配。
+  // 人员目录（users）没有任何修改入口，只是账号选择器用的只读名单，仍然直接取 seed：
+  // 一旦把它也落盘，以后更新 seed.ts 里的人员名单反而会被旧的落盘数据盖住、不生效
+  departments: Department[];
+  accounts: Account[];
 }
 
 interface SyncJob {
@@ -33,9 +39,9 @@ interface SyncJob {
 
 class Store {
   // 工单/处理记录/站内信/同步日志均为真实数据，不再生成模拟数据，改为从磁盘加载（见 load()）；
-  // 人员/部门/账号配置保留，保证系统登录与人员目录不受影响
+  // 部门/账号首次启动用 seed 打底，之后以落盘数据为准；人员目录始终取 seed
   tickets: Ticket[] = [];
-  departments = DEPARTMENTS;
+  departments: Department[] = DEPARTMENTS;
   users = USERS;
   accounts: Account[] = generateAccounts();
   messages: InSiteMessage[] = [];
@@ -64,6 +70,22 @@ class Store {
       this.logs = parsed.logs ?? [];
       this.lastUpdateTime = parsed.lastUpdateTime ?? "";
       this.lastScheduledSyncDate = parsed.lastScheduledSyncDate ?? null;
+
+      // 用 ?? 而不是 ||：老版本的 store.json 里没有这两个键（undefined）才回退到 seed 打底；
+      // 用户确实在页面上把部门/账号删空的情况下存的是 []，那是有效状态，必须原样保留，
+      // 不能又被 seed 数据填回来
+      this.departments = parsed.departments ?? DEPARTMENTS;
+      this.accounts = parsed.accounts ?? generateAccounts();
+
+      // 兜底：管理员账号是锁定的、页面上删不掉，但万一落盘数据被手工改坏导致一个管理员都没有，
+      // 就会彻底登不进系统、也没有任何入口能把它加回来。这里补一个回去，避免被锁在门外
+      if (!this.accounts.some((a) => a.role === "admin")) {
+        const seededAdmin = generateAccounts().find((a) => a.role === "admin");
+        if (seededAdmin) {
+          console.warn("[store] 落盘数据里没有管理员账号，已自动补回默认超级管理员，避免无法登录");
+          this.accounts.unshift(seededAdmin);
+        }
+      }
     } catch (e) {
       console.error(`[store] 读取持久化数据失败（${DATA_FILE}），本次将以空数据启动：`, (e as Error).message);
     }
@@ -79,6 +101,8 @@ class Store {
         logs: this.logs,
         lastUpdateTime: this.lastUpdateTime,
         lastScheduledSyncDate: this.lastScheduledSyncDate,
+        departments: this.departments,
+        accounts: this.accounts,
       };
       const tmpFile = `${DATA_FILE}.tmp`;
       fs.writeFileSync(tmpFile, JSON.stringify(state));
