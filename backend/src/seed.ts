@@ -73,6 +73,10 @@ export const USERS: SeedUser[] = [
   { id: "u-hj", name: "何俊", pinyin: "hj", role: "requester", departmentId: "dept-warehouse", avatarColor: "#ff9c6e" },
 ];
 
+// 系统的默认超级管理员，是唯一一个不依赖工单数据存在的人员：工单数据为空时（全新部署还没
+// 同步过数据）人员目录会是空的，没有他就没有任何人能登录、也没人能去授权别人
+export const SEED_ADMIN = USERS.find((u) => u.role === "admin")!;
+
 const REQUESTERS = USERS.filter((u) => u.role === "requester");
 const IT_HANDLERS = USERS.filter((u) => u.role === "it_handler");
 const DEVELOPERS = USERS.filter((u) => u.role === "developer");
@@ -396,17 +400,19 @@ export function generateLogs(): LogEntry[] {
 
 // 账号配置初始数据：单术婷为系统默认超级管理员，不可编辑/删除；
 // 其余管理员/IT受理人/需求方角色的现有人员默认已配置好账号，避免上线后现有人员无法登录
+// 初始账号只给这一个锁定的超级管理员：其余人员由管理员在"账号管理"页面，从工单数据
+// 自动汇总出的真实人员目录（userDirectory.ts）里挑人授权。
+// 早期这里会把 USERS 里的 it_handler/requester 一并生成账号，但那份是原型阶段的示例人员，
+// 跟当曲云同步回来的真人对不上，等于凭空造了一批登不上也没用的假账号
 export function generateAccounts(): Account[] {
-  const admin = USERS.find((u) => u.role === "admin")!;
-  const configurable = USERS.filter((u) => u.role === "it_handler" || u.role === "requester");
   return [
-    { id: uuid(), userId: admin.id, name: admin.name, pinyin: admin.pinyin, role: "admin", locked: true },
-    ...configurable.map((u) => ({
+    {
       id: uuid(),
-      userId: u.id,
-      name: u.name,
-      pinyin: u.pinyin,
-      role: u.role as Account["role"],
-    })),
+      userId: SEED_ADMIN.id,
+      name: SEED_ADMIN.name,
+      pinyin: SEED_ADMIN.pinyin,
+      role: "admin",
+      locked: true,
+    },
   ];
 }
