@@ -1,8 +1,9 @@
 import fs from "fs";
 import path from "path";
 import { v4 as uuid } from "uuid";
-import { DEPARTMENTS, USERS, generateAccounts } from "./seed";
-import { Account, ChangeLogEntry, Department, InSiteMessage, LogEntry, Ticket } from "./types";
+import { DEPARTMENTS, SEED_ADMIN, generateAccounts } from "./seed";
+import { buildUserDirectory } from "./userDirectory";
+import { Account, ChangeLogEntry, Department, InSiteMessage, LogEntry, Ticket, User } from "./types";
 
 // 工单/处理记录/站内信/同步日志是真实业务数据（不是每次启动都重新生成的模拟数据），
 // 必须落盘持久化，否则进程一重启（比如 ts-node-dev 检测到文件变化自动重启）就会全部丢失。
@@ -42,8 +43,14 @@ class Store {
   // 部门/账号首次启动用 seed 打底，之后以落盘数据为准；人员目录始终取 seed
   tickets: Ticket[] = [];
   departments: Department[] = DEPARTMENTS;
-  users = USERS;
   accounts: Account[] = generateAccounts();
+
+  // 人员目录不是一份独立维护的数据，而是从真实工单数据里实时汇总出来的（受理人/发起人/
+  // 开发人员/处理人/关注人），保证跟当曲云同步回来的真人对得上——seed 里那份是原型阶段的
+  // 示例名单，跟真实人员对不上会导致真人拿不到账号。锁定的默认管理员始终保留在最前面
+  get users(): User[] {
+    return buildUserDirectory(this.tickets, this.departments, SEED_ADMIN);
+  }
   messages: InSiteMessage[] = [];
   logs: LogEntry[] = [];
   lastUpdateTime = "";
