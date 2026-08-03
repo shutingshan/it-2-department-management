@@ -22,7 +22,31 @@ function waitForConfirm(promptText: string): Promise<string> {
   });
 }
 
+// 后端服务每 5 秒会把它内存里的数据自动落盘一次。如果它正开着，本脚本删完写入 store.json 后，
+// 会被后端那份"还没删过的"内存数据覆盖回去——清理白做，甚至可能两边同时写导致文件损坏。
+// 所以跑之前必须先把后端停掉，这里主动探测一下，别等用户白跑一趟才发现
+async function assertBackendNotRunning() {
+  const port = process.env.PORT ?? 4000;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 2000);
+    const res = await fetch(`http://localhost:${port}/api/health`, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (res.ok) {
+      throw new Error(
+        `检测到后端服务正在运行（localhost:${port}）。它每 5 秒会自动落盘一次，` +
+          `会把本次清理的结果覆盖掉。请先在跑后端的那个终端按 Ctrl+C 停掉服务，再执行本脚本。`
+      );
+    }
+  } catch (e) {
+    // 连不上（ECONNREFUSED / abort）说明后端没跑，正是我们要的；只有上面主动抛的那个才往外传
+    if (e instanceof Error && e.message.includes("检测到后端服务正在运行")) throw e;
+  }
+}
+
 async function main() {
+  await assertBackendNotRunning();
+
   console.log(`[cleanup] 本地现有工单：${store.tickets.length} 条`);
   if (store.tickets.length === 0) {
     console.log("[cleanup] 本地没有工单，无需清理。");
