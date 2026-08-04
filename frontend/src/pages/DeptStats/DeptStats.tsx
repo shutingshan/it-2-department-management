@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, Col, Row, Select, Table, TreeSelect } from "antd";
-import ReactECharts from "echarts-for-react";
+import Chart from "../../components/Chart";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import StatCard from "../../components/StatCard";
@@ -151,7 +151,7 @@ export default function DeptStats() {
       <Row gutter={12} style={{ marginBottom: 12 }}>
         <Col span={12}>
           <Card size="small" title="父级部门月度提交及完成趋势">
-            <ReactECharts
+            <Chart
               option={trendOption}
               style={{ height: 240 }}
               onEvents={{
@@ -162,12 +162,12 @@ export default function DeptStats() {
         </Col>
         <Col span={6}>
           <Card size="small" title="已花费工时占比">
-            <ReactECharts option={spentPieOption} style={{ height: 240 }} />
+            <Chart option={spentPieOption} style={{ height: 240 }} />
           </Card>
         </Col>
         <Col span={6}>
           <Card size="small" title="预估花费工时占比">
-            <ReactECharts option={estPieOption} style={{ height: 240 }} />
+            <Chart option={estPieOption} style={{ height: 240 }} />
           </Card>
         </Col>
       </Row>
@@ -175,12 +175,12 @@ export default function DeptStats() {
       <Row gutter={12} style={{ marginBottom: 12 }}>
         <Col span={12}>
           <Card size="small" title={`各部门月度已花费实际工时占比（按${ratioYearLabel}年）`}>
-            <ReactECharts option={monthlySpentShareOption} style={{ height: 260 }} />
+            <Chart option={monthlySpentShareOption} style={{ height: 260 }} />
           </Card>
         </Col>
         <Col span={12}>
           <Card size="small" title={`各部门月度预估花费工时占比（按${ratioYearLabel}年）`}>
-            <ReactECharts option={monthlyEstimatedShareOption} style={{ height: 260 }} />
+            <Chart option={monthlyEstimatedShareOption} style={{ height: 260 }} />
           </Card>
         </Col>
       </Row>

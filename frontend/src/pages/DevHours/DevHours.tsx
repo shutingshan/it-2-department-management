@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, Col, Row, Select, Table, Radio } from "antd";
-import ReactECharts from "echarts-for-react";
+import Chart from "../../components/Chart";
 import { api } from "../../api/client";
 
 // 迭代筛选的"全部迭代"选项，跟真实迭代名称不会撞车
@@ -211,7 +211,7 @@ export default function DevHours() {
               />
             }
           >
-            <ReactECharts option={yoyOption} style={{ height: 220 }} />
+            <Chart option={yoyOption} style={{ height: 220 }} />
           </Card>
 
           <Card
@@ -267,7 +267,7 @@ export default function DevHours() {
               />
             }
           >
-            <ReactECharts option={deptHoursOption} style={{ height: 260 }} />
+            <Chart option={deptHoursOption} style={{ height: 260 }} />
           </Card>
         </Col>
       </Row>

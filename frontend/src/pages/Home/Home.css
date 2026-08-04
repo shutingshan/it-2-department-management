@@ -13,6 +13,6 @@
 .progress-value {
   font-size: 32px;
   font-weight: 700;
-  color: #2f54eb;
+  color: var(--app-primary);
   margin-top: 8px;
 }

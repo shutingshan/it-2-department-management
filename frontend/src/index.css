@@ -1,3 +1,75 @@
+/*
+ * 皮肤配色变量：浅色（默认）取的就是原来写死在各 CSS 里的那套值，切换前后视觉不变；
+ * 深色由 html[data-theme="dark"] 覆盖（切换逻辑见 src/store/theme.ts）。
+ * antd 组件本身的配色不在这里，走 ConfigProvider 的算法（见 src/ThemeProvider.tsx）。
+ */
+:root {
+  --app-bg-gradient: linear-gradient(135deg, #f3f5ff 0%, #fbf3f8 55%, #fffaf3 100%);
+  --app-bar-gradient: linear-gradient(90deg, #eef2ff 0%, #fdf2f8 55%, #fff7ed 100%);
+  --app-sider-gradient: linear-gradient(180deg, #eef2ff 0%, #fdf2f8 55%, #fff7ed 100%);
+  --app-login-gradient: linear-gradient(135deg, #eef2ff 0%, #fdf2f8 50%, #fff7ed 100%);
+
+  --app-surface: #fff;
+  --app-border: rgba(17, 24, 39, 0.06);
+  --app-border-strong: rgba(17, 24, 39, 0.08);
+  --app-divider: #eee;
+
+  --app-text: #111827;
+  --app-text-secondary: #595959;
+  --app-text-muted: #8c8c8c;
+  --app-text-faint: #bfbfbf;
+
+  --app-primary: #2f54eb;
+  --app-primary-soft: #eef2ff;
+  --app-primary-hover: #f0f2ff;
+  --app-primary-shadow: rgba(47, 84, 235, 0.12);
+
+  --app-table-head: #f7f8fa;
+  --app-row-urgent: #fff1f0;
+  --app-resize-active: #91caff;
+
+  --app-warning: #d48806;
+  --app-danger: #cf1322;
+  --app-danger-strong: #f5222d;
+
+  --app-login-card-shadow: 0 24px 64px rgba(8, 15, 33, 0.35);
+}
+
+:root[data-theme="dark"] {
+  /* 深色下渐变收敛成低饱和的深蓝灰，保留一点原来的层次感但不刺眼 */
+  --app-bg-gradient: linear-gradient(135deg, #141824 0%, #17151f 55%, #1a1712 100%);
+  --app-bar-gradient: linear-gradient(90deg, #1b2030 0%, #1f1b28 55%, #221d18 100%);
+  --app-sider-gradient: linear-gradient(180deg, #1b2030 0%, #1f1b28 55%, #221d18 100%);
+  --app-login-gradient: linear-gradient(135deg, #141824 0%, #1b1622 50%, #221d18 100%);
+
+  --app-surface: #1f1f1f;
+  --app-border: rgba(255, 255, 255, 0.12);
+  --app-border-strong: rgba(255, 255, 255, 0.16);
+  --app-divider: rgba(255, 255, 255, 0.12);
+
+  --app-text: #e8eaed;
+  --app-text-secondary: #b6bac2;
+  --app-text-muted: #8f959f;
+  --app-text-faint: #6b7076;
+
+  --app-primary: #597ef7;
+  --app-primary-soft: #232c47;
+  --app-primary-hover: #262f4a;
+  --app-primary-shadow: rgba(89, 126, 247, 0.25);
+
+  --app-table-head: #262626;
+  /* 紧急行用深红底，仍能一眼看出但不至于在深色下刺眼 */
+  --app-row-urgent: #3a2020;
+  --app-resize-active: #4b7fd6;
+
+  /* 深色背景下这几个提示色要提亮，否则对比度不够看不清 */
+  --app-warning: #e8b339;
+  --app-danger: #ff7875;
+  --app-danger-strong: #ff7875;
+
+  --app-login-card-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -12,6 +84,8 @@ body,
 body {
   font-family: "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
+  background: var(--app-bg-gradient);
+  color: var(--app-text);
 }
 
 .ellipsis {

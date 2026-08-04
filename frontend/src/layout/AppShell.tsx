@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Avatar, Breadcrumb, Button, Checkbox, Layout, Menu, Modal, Space, Typography } from "antd";
+import { Avatar, Breadcrumb, Button, Checkbox, Layout, Menu, Modal, Space, Tooltip, Typography } from "antd";
 import {
   ApartmentOutlined,
   AppstoreOutlined,
@@ -9,12 +9,15 @@ import {
   HistoryOutlined,
   HomeOutlined,
   LogoutOutlined,
+  MoonOutlined,
   SettingOutlined,
+  SunOutlined,
   SwapOutlined,
   UserOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../store/auth";
 import { useViewTargetStore } from "../store/viewTarget";
+import { useThemeStore } from "../store/theme";
 import UpdateTicketsButton from "../components/UpdateTicketsButton";
 import MessageBell from "../components/MessageBell";
 import { ROLE_LABELS } from "../api/types";
@@ -66,6 +69,7 @@ export default function AppShell() {
     });
   }
 
+  const themeMode = useThemeStore((s) => s.mode);
   const activeMenu = MENU_ITEMS.find((m) => location.pathname.startsWith(m.key));
   const activeKey = activeMenu?.key ?? "/tickets";
   const activeLabel = activeMenu?.label ?? "工单中心";
@@ -73,7 +77,7 @@ export default function AppShell() {
   return (
     <Layout style={{ minHeight: "100vh" }}>
       <Sider
-        theme="light"
+        theme={themeMode}
         width={188}
         collapsedWidth={64}
         collapsible
@@ -86,7 +90,7 @@ export default function AppShell() {
           {!collapsed && <span className="app-logo-text">二部工单中心</span>}
         </div>
         <Menu
-          theme="light"
+          theme={themeMode}
           mode="inline"
           selectedKeys={[activeKey]}
           items={MENU_ITEMS}
@@ -105,6 +109,7 @@ export default function AppShell() {
             <SwitchTargetButton />
             <UpdateTicketsButton onRefresh={() => setRefreshTick((t) => t + 1)} />
             <MessageBell />
+            <ThemeToggleButton />
             <UserMenu />
             <Button type="text" icon={<LogoutOutlined />} onClick={handleLogout}>
               退出
@@ -116,6 +121,23 @@ export default function AppShell() {
         </Content>
       </Layout>
     </Layout>
+  );
+}
+
+// 皮肤切换：浅色（默认）/ 深色，选择记在 localStorage，刷新后保持
+function ThemeToggleButton() {
+  const mode = useThemeStore((s) => s.mode);
+  const toggle = useThemeStore((s) => s.toggle);
+  const toDark = mode === "light";
+  return (
+    <Tooltip title={toDark ? "切换深色皮肤" : "切换浅色皮肤"}>
+      <Button
+        type="text"
+        aria-label={toDark ? "切换深色皮肤" : "切换浅色皮肤"}
+        icon={toDark ? <MoonOutlined /> : <SunOutlined />}
+        onClick={toggle}
+      />
+    </Tooltip>
   );
 }
 
