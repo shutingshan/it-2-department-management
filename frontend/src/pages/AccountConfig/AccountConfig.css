@@ -1,5 +1,5 @@
 .account-config-page {
-  background: #fff;
+  background: var(--app-surface);
   border-radius: 8px;
   padding: 16px 20px;
 }

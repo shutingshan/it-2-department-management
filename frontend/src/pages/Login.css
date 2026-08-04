@@ -4,15 +4,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #eef2ff 0%, #fdf2f8 50%, #fff7ed 100%);
+  background: var(--app-login-gradient);
 }
 
 .login-card {
   width: 380px;
   padding: 40px 36px 32px;
-  background: #fff;
+  background: var(--app-surface);
   border-radius: 20px;
-  box-shadow: 0 24px 64px rgba(8, 15, 33, 0.35);
+  box-shadow: var(--app-login-card-shadow);
   text-align: center;
 }
 
@@ -28,12 +28,12 @@
 .login-title {
   font-size: 20px;
   font-weight: 700;
-  color: #111827;
+  color: var(--app-text);
   margin: 4px 0 4px;
 }
 
 .login-subtitle {
-  color: #6b7280;
+  color: var(--app-text-secondary);
   font-size: 13px;
   margin-bottom: 24px;
 }
@@ -53,7 +53,7 @@
 }
 
 .login-error {
-  color: #f5222d;
+  color: var(--app-danger-strong);
   font-size: 12px;
   margin-top: -6px;
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, Col, Row, Select, Space, Typography } from "antd";
-import ReactECharts from "echarts-for-react";
+import Chart from "../../components/Chart";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import StatCard from "../../components/StatCard";
@@ -138,7 +138,7 @@ export default function Home() {
             }
           >
             {!stageDrill ? (
-              <ReactECharts
+              <Chart
                 option={stageOption}
                 style={{ height: 260 }}
                 onEvents={{
@@ -148,7 +148,7 @@ export default function Home() {
                 }}
               />
             ) : (
-              <ReactECharts
+              <Chart
                 option={{
                   tooltip: { trigger: "item" },
                   series: [
@@ -177,13 +177,13 @@ export default function Home() {
             extra={handlerDrill && <a onClick={() => setHandlerDrill(null)}>返回</a>}
           >
             {!handlerDrill ? (
-              <ReactECharts
+              <Chart
                 option={handlerOption}
                 style={{ height: 260 }}
                 onEvents={{ click: (p: any) => setHandlerDrill(p.name) }}
               />
             ) : (
-              <ReactECharts
+              <Chart
                 option={{
                   tooltip: { trigger: "item" },
                   series: [
@@ -223,7 +223,7 @@ export default function Home() {
               />
             }
           >
-            <ReactECharts option={trendOption} style={{ height: 260 }} />
+            <Chart option={trendOption} style={{ height: 260 }} />
           </Card>
         </Col>
         <Col span={8}>
