@@ -3,6 +3,7 @@ import { AutoComplete, Button, Dropdown, Modal, Popover, Progress, Space, Tag, m
 import { CloudSyncOutlined, DownOutlined } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { api } from "../api/client";
+import { SYNC_PERMISSIONS } from "../api/types";
 import { useSync } from "../hooks/useSync";
 import { useAuthStore } from "../store/auth";
 import { useFilteredTicketsStore } from "../store/filteredTickets";
@@ -202,9 +203,13 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
   );
 
   const jobRunning = busy || job?.status === "running" || singleSyncing;
-  // 只展示该账号被授权的操作（管理员由后端直接返回全部）。这只是体验层面的隐藏，
-  // 真正的拦截在后端 assertSyncPermission，直接调接口同样会被 403 挡掉
-  const granted = user?.syncPermissions ?? [];
+  // 只展示该账号被授权的操作。这只是体验层面的隐藏，
+  // 真正的拦截在后端 assertSyncPermission，直接调接口同样会被 403 挡掉。
+  // 管理员按角色直接放行，跟后端 assertSyncPermission 的判断保持一致：
+  // syncPermissions 是后来才加的字段，只在登录接口下发，光看这个字段会把
+  // 加字段之前就登录着、本地缓存里没有该字段的管理员整个入口隐藏掉
+  const isAdmin = user?.role === "admin";
+  const granted = isAdmin ? SYNC_PERMISSIONS.map((p) => p.key) : user?.syncPermissions ?? [];
   const allow = (key: string) => granted.includes(key as (typeof granted)[number]);
   const items: MenuProps["items"] = [
     { key: "fetch-incremental", label: "获取新工单", disabled: jobRunning },
