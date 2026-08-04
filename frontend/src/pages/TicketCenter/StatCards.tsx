@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Tooltip } from "antd";
 import { QuestionCircleOutlined } from "@ant-design/icons";
 import { api } from "../../api/client";
+import { useAuthStore } from "../../store/auth";
 import "./StatCards.css";
 
 export interface CardStat {
@@ -26,12 +27,21 @@ export default function StatCards({
   onSelect: (cardKey: string) => void;
 }) {
   const [stats, setStats] = useState<CardStat[]>([]);
+  const { user } = useAuthStore();
 
   useEffect(() => {
+    // 必须带上登录身份：后端据此圈定可见范围（IT受理人只统计自己负责的工单），
+    // 否则卡片上的数量会大于该身份实际能在列表里看到的工单数
     api
-      .get("/tickets/card-stats", { params: itHandlers?.length ? { itHandler: itHandlers } : undefined })
+      .get("/tickets/card-stats", {
+        params: {
+          actor: user?.name,
+          actorRole: user?.role,
+          ...(itHandlers?.length ? { itHandler: itHandlers } : {}),
+        },
+      })
       .then((res) => setStats(res.data.data));
-  }, [refreshKey, itHandlers]);
+  }, [refreshKey, itHandlers, user?.name, user?.role]);
 
   const topLevel = stats.filter((s) => !s.parentId);
   const childrenOf = (id: string) => stats.filter((s) => s.parentId === id);
