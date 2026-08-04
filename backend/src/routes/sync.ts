@@ -20,7 +20,22 @@ import {
 } from "../scrapers/tapdAuth";
 import { config } from "../config";
 import { applyFilters, parseQuery, TicketQuery } from "../filter";
-import { Ticket } from "../types";
+import { SyncPermission, Ticket } from "../types";
+
+// 权限不足跟"抓取失败"是两码事：前者该返回 403 让前端明确提示去找管理员开权限，
+// 后者才是 500。用独立错误类型区分，不靠匹配错误文案
+class SyncPermissionError extends Error {}
+
+// 同步类操作按账号授权（管理员始终全部可用）。前端会隐藏没授权的菜单项，
+// 但那只是体验，真正的拦截必须在这里做——否则直接调接口就绕过去了
+function assertSyncPermission(actor: string | undefined, key: SyncPermission): void {
+  const account = store.accounts.find((a) => a.name === actor);
+  if (!account) throw new SyncPermissionError("当前账号未授权，请联系管理员进行授权");
+  if (account.role === "admin") return;
+  if (!(account.syncPermissions ?? []).includes(key)) {
+    throw new SyncPermissionError("没有该操作的权限，请联系管理员在账号配置中勾选");
+  }
+}
 
 // TAPD 取数入口：按 .env 里 TAPD_FETCH_MODE 在 开放平台API / 浏览器页面爬取 两种方式间切换，
 // 两种方式返回同一套字段结构，后续的字段应用/阶段重算逻辑完全一致
@@ -194,9 +209,13 @@ export async function runFetchNew(actor: string, mode?: "incremental" | "full") 
 router.post("/fetch-new", async (req, res) => {
   const { actor, mode } = req.body as { actor: string; mode?: "incremental" | "full" };
   try {
+    assertSyncPermission(actor, mode === "full" ? "fetch-full" : "fetch-incremental");
     const result = await runFetchNew(actor, mode);
     res.json({ ...result, job: store.currentJob });
   } catch (e) {
+    if (e instanceof SyncPermissionError) {
+      return res.status(403).json({ message: e.message });
+    }
     res.status(500).json({ message: `获取新工单失败：${(e as Error).message ?? "未知错误"}` });
   }
 });
@@ -331,6 +350,11 @@ export function startUpdateTicketsJob(actor: string, filters?: unknown): { job: 
 }
 
 router.post("/update-tickets", (req, res) => {
+  try {
+    assertSyncPermission((req.body as { actor?: string }).actor, "update");
+  } catch (e) {
+    return res.status(403).json({ message: (e as Error).message });
+  }
   const { actor, actorRole, filters } = req.body as { actor: string; actorRole: string; filters?: unknown };
 
   if (actorRole !== "admin" && !withinUpdateWindow()) {
@@ -516,11 +540,15 @@ router.get("/tapd-login/status", (_req, res) => {
   res.json({ data: getInteractiveLoginStatus() });
 });
 
-router.post("/tapd-login/start", async (_req, res) => {
+router.post("/tapd-login/start", async (req, res) => {
   try {
+    assertSyncPermission((req.body as { actor?: string }).actor, "tapd-login");
     await startInteractiveLogin();
     res.json({ data: getInteractiveLoginStatus() });
   } catch (e) {
+    if (e instanceof SyncPermissionError) {
+      return res.status(403).json({ message: e.message });
+    }
     res.status(500).json({ message: (e as Error).message ?? "打开TAPD登录窗口失败" });
   }
 });
@@ -551,10 +579,15 @@ router.post("/tapd-login/cancel", async (_req, res) => {
 router.post("/tapd/:id", async (req, res) => {
   const ticket = store.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ message: "工单不存在" });
+  const { actor } = req.body as { actor?: string };
+  try {
+    assertSyncPermission(actor, "tapd");
+  } catch (e) {
+    return res.status(403).json({ message: (e as Error).message });
+  }
   if (needTapdLogin()) {
     return res.status(409).json({ needLogin: true, message: TAPD_LOGIN_HINT });
   }
-  const { actor } = req.body as { actor?: string };
   try {
     const fields = await syncSingleTicketTapd(ticket, actor ?? "未知");
     // 只报告"真正没抓到"的字段：TAPD 上本来就没填（emptyFields）的不算异常，
@@ -719,6 +752,11 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
 
 router.post("/tapd", (req, res) => {
   const { actor, filters } = req.body as { actor: string; filters?: unknown };
+  try {
+    assertSyncPermission(actor, "tapd");
+  } catch (e) {
+    return res.status(403).json({ message: (e as Error).message });
+  }
   if (needTapdLogin()) {
     return res.status(409).json({ needLogin: true, message: TAPD_LOGIN_HINT });
   }
