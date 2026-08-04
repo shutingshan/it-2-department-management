@@ -112,12 +112,27 @@ export function isSameYear(dateStr: string | null, year: number): boolean {
 }
 
 // 需求方仅能查看发起人或关注人包含本人的数据；管理员/IT受理人不受此限制（IT受理人的限制体现在编辑权限上，不影响查看）
+// 按登录身份圈定可见范围（管理员不受限，能看全部）：
+// - 需求方：只看自己发起的、或把自己列为关注人的工单
+// - IT受理人：只看 IT受理人 是自己的工单
 export function scopeForActor(tickets: Ticket[], actor?: string, actorRole?: string): Ticket[] {
-  if (actorRole !== "requester" || !actor) return tickets;
-  return tickets.filter((t) => t.requester === actor || t.watcher.includes(actor));
+  if (!actor) return tickets;
+  if (actorRole === "requester") {
+    return tickets.filter((t) => t.requester === actor || t.watcher.includes(actor));
+  }
+  if (actorRole === "it_handler") {
+    return tickets.filter((t) => t.itHandler === actor);
+  }
+  return tickets;
 }
 
 export function canViewTicket(ticket: Ticket, actor?: string, actorRole?: string): boolean {
-  if (actorRole !== "requester" || !actor) return true;
-  return ticket.requester === actor || ticket.watcher.includes(actor);
+  if (!actor) return true;
+  if (actorRole === "requester") {
+    return ticket.requester === actor || ticket.watcher.includes(actor);
+  }
+  if (actorRole === "it_handler") {
+    return ticket.itHandler === actor;
+  }
+  return true;
 }

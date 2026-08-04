@@ -14,7 +14,11 @@ const router = Router();
 // 跟"我负责的工单"/"切换人员"的既有语义保持一致
 router.get("/card-stats", (req, res) => {
   const { itHandler } = parseQuery(req.query as Record<string, unknown>);
-  const tickets = itHandler?.length ? store.tickets.filter((t) => itHandler.includes(t.itHandler)) : store.tickets;
+  const { actor, actorRole } = req.query as { actor?: string; actorRole?: string };
+  // 先按登录身份圈定可见范围（IT受理人只看自己负责的、需求方只看跟自己相关的），
+  // 再叠加"切换人员"选中的目标——否则卡片数量会大于该身份实际能在列表里看到的工单数
+  const scoped = scopeForActor(store.tickets, actor, actorRole);
+  const tickets = itHandler?.length ? scoped.filter((t) => itHandler.includes(t.itHandler)) : scoped;
   res.json({ data: computeCardStats(tickets) });
 });
 
