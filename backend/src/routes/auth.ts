@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { store } from "../store";
-import { Account } from "../types";
+import { Account, SYNC_PERMISSIONS } from "../types";
 
 const router = Router();
 
@@ -13,6 +13,9 @@ function toSessionUser(account: Account) {
     role: account.role,
     departmentId: base?.departmentId ?? "",
     avatarColor: base?.avatarColor ?? "#999999",
+    // 管理员始终拥有全部同步操作权限，不依赖逐个勾选
+    syncPermissions:
+      account.role === "admin" ? SYNC_PERMISSIONS.map((p) => p.key) : account.syncPermissions ?? [],
   };
 }
 

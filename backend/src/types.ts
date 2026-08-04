@@ -24,6 +24,23 @@ export interface Department {
 // 账号配置支持的登录角色：管理员/IT受理人/需求方。开发人员/测试人员/产品经理仅作为工单数据里的人员标签存在，不具备登录能力
 export type AccountRole = "admin" | "it_handler" | "requester";
 
+// "更新工单"下拉里可以单独授权的操作。这些操作都会真的去抓当曲云/TAPD，
+// 耗时长且会改写全量数据，不该人人都能点，因此做成按账号勾选
+export type SyncPermission =
+  | "fetch-incremental"
+  | "fetch-full"
+  | "update"
+  | "tapd"
+  | "tapd-login";
+
+export const SYNC_PERMISSIONS: { key: SyncPermission; label: string }[] = [
+  { key: "fetch-incremental", label: "获取新工单" },
+  { key: "fetch-full", label: "全量获取（用于数据初始化）" },
+  { key: "update", label: "更新工单（按当前筛选）" },
+  { key: "tapd", label: "获取TAPD信息（按当前筛选）" },
+  { key: "tapd-login", label: "TAPD扫码登录" },
+];
+
 export interface Account {
   id: string;
   userId: string; // 关联 USERS 中的人员记录，姓名/拼音码/部门等信息取自该记录
@@ -31,6 +48,9 @@ export interface Account {
   pinyin: string;
   role: AccountRole;
   locked?: boolean; // 系统默认超级管理员账号，不可编辑、不可删除
+  // "更新工单"下拉里该账号被授权的操作；管理员不受此字段限制（始终全部可用）。
+  // 未配置（undefined）按"一个都没授权"处理——这类操作影响全量数据，默认不给更安全
+  syncPermissions?: SyncPermission[];
 }
 
 // 状态：来自当曲云/TAPD原始状态

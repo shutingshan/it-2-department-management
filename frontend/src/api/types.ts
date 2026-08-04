@@ -10,7 +10,20 @@ export interface User {
   role: Role;
   departmentId: string;
   avatarColor: string;
+  // 该账号被授权的"更新工单"操作；管理员由后端直接返回全部
+  syncPermissions?: SyncPermission[];
 }
+
+// "更新工单"下拉里可以按账号单独授权的操作（跟后端 types.ts 的 SYNC_PERMISSIONS 一一对应）
+export type SyncPermission = "fetch-incremental" | "fetch-full" | "update" | "tapd" | "tapd-login";
+
+export const SYNC_PERMISSIONS: { key: SyncPermission; label: string }[] = [
+  { key: "fetch-incremental", label: "获取新工单" },
+  { key: "fetch-full", label: "全量获取（用于数据初始化）" },
+  { key: "update", label: "更新工单（按当前筛选）" },
+  { key: "tapd", label: "获取TAPD信息（按当前筛选）" },
+  { key: "tapd-login", label: "TAPD扫码登录" },
+];
 
 export interface Account {
   id: string;
@@ -19,6 +32,7 @@ export interface Account {
   pinyin: string;
   role: AccountRole;
   locked?: boolean;
+  syncPermissions?: SyncPermission[];
 }
 
 export interface Department {

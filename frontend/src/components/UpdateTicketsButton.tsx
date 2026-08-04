@@ -106,7 +106,8 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
     setLoginStarting(true);
     try {
       // 打开窗口要先加载TAPD首页，比较慢，给足超时
-      await api.post("/sync/tapd-login/start", {}, { timeout: 600000 });
+      // 带上操作人：后端要据此校验该账号是否被授权做 TAPD 扫码登录
+      await api.post("/sync/tapd-login/start", { actor: user?.name }, { timeout: 600000 });
       setLoginModalOpen(true);
     } catch (e: any) {
       setPendingTapdCode(null);
@@ -201,6 +202,10 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
   );
 
   const jobRunning = busy || job?.status === "running" || singleSyncing;
+  // 只展示该账号被授权的操作（管理员由后端直接返回全部）。这只是体验层面的隐藏，
+  // 真正的拦截在后端 assertSyncPermission，直接调接口同样会被 403 挡掉
+  const granted = user?.syncPermissions ?? [];
+  const allow = (key: string) => granted.includes(key as (typeof granted)[number]);
   const items: MenuProps["items"] = [
     { key: "fetch-incremental", label: "获取新工单", disabled: jobRunning },
     { key: "fetch-full", label: "全量获取（用于数据初始化）", disabled: jobRunning },
@@ -208,7 +213,7 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
     { key: "tapd", label: "获取TAPD信息（按当前筛选）", disabled: jobRunning },
     { key: "tapd-login", label: "TAPD扫码登录", disabled: jobRunning },
     { key: "abnormal", label: "获取异常数据（需求待确认）", disabled: true },
-  ];
+  ].filter((it) => it.key === "abnormal" || allow(it.key));
 
   const onMenuClick: MenuProps["onClick"] = ({ key }) => {
     if (key === "fetch-incremental") handleFetchNew("incremental");
@@ -217,6 +222,9 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
     else if (key === "tapd") openTapdModal();
     else if (key === "tapd-login") handleTapdLogin();
   };
+
+  // 一个同步操作都没授权（比如需求方）：整个入口都不展示，省得点开是空菜单
+  if (granted.length === 0) return null;
 
   return (
     <Space size={8}>
