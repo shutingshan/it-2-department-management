@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
-import { Button, Form, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Button, Checkbox, Form, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from "antd";
 import { LockOutlined, PlusOutlined } from "@ant-design/icons";
 import { api } from "../../api/client";
-import type { Account, AccountRole, User } from "../../api/types";
-import { ROLE_LABELS } from "../../api/types";
+import type { Account, AccountRole, SyncPermission, User } from "../../api/types";
+import { ROLE_LABELS, SYNC_PERMISSIONS } from "../../api/types";
 import { useAuthStore } from "../../store/auth";
 import "./AccountConfig.css";
 
@@ -18,7 +18,13 @@ export default function AccountConfig() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [form] = Form.useForm<{ userId: string; role: AccountRole }>();
+  const [form] = Form.useForm<{
+    userId: string;
+    role: AccountRole;
+    syncPermissions?: SyncPermission[];
+  }>();
+  // 角色决定要不要展示权限勾选（管理员天然全量），须在 form 声明之后取
+  const selectedRole = Form.useWatch("role", form);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -46,7 +52,11 @@ export default function AccountConfig() {
 
   function openEdit(account: Account) {
     setEditing(account);
-    form.setFieldsValue({ userId: account.userId, role: account.role });
+    form.setFieldsValue({
+      userId: account.userId,
+      role: account.role,
+      syncPermissions: account.syncPermissions ?? [],
+    });
     setModalOpen(true);
   }
 
@@ -177,6 +187,27 @@ export default function AccountConfig() {
               }
             />
           </Form.Item>
+          {selectedRole === "admin" ? (
+            <Form.Item label={'"更新工单"操作权限'}>
+              <Typography.Text type="secondary">管理员默认拥有全部操作权限，无需单独勾选。</Typography.Text>
+            </Form.Item>
+          ) : (
+            <Form.Item
+              name="syncPermissions"
+              label={'"更新工单"操作权限'}
+              extra="不勾选任何一项时，该账号看不到“更新工单”按钮"
+            >
+              <Checkbox.Group>
+                <Space direction="vertical" size={4}>
+                  {SYNC_PERMISSIONS.map((p) => (
+                    <Checkbox key={p.key} value={p.key}>
+                      {p.label}
+                    </Checkbox>
+                  ))}
+                </Space>
+              </Checkbox.Group>
+            </Form.Item>
+          )}
         </Form>
       </Modal>
     </div>
