@@ -37,6 +37,7 @@ export default function AppShell() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
+  const setViewTargets = useViewTargetStore((s) => s.setTargets);
   const [refreshTick, setRefreshTick] = useState(0);
   // 侧边栏默认收起，把横向空间尽量留给工单列表（列很多，需要横向滚动）
   const [collapsed, setCollapsed] = useState(true);
@@ -63,6 +64,9 @@ export default function AppShell() {
       cancelText: "取消",
       centered: true,
       onOk: () => {
+        // 查看目标是跨登录会话残留在内存里的，不清的话换个人登录后
+        // 会带着上一个人的筛选，列表看起来是空的
+        setViewTargets([]);
         logout();
         navigate("/login");
       },
@@ -146,6 +150,8 @@ function MyTicketsButton() {
   const { setTargets } = useViewTargetStore();
   const navigate = useNavigate();
   if (!user) return null;
+  // 这个按钮是按"IT受理人=自己"过滤，需求方永远不是受理人，点了必然是空列表，故不展示
+  if (user.role === "requester") return null;
 
   // 快捷入口：把人员筛选直接设成自己，再跳到工单中心
   return (
@@ -162,6 +168,7 @@ function MyTicketsButton() {
 }
 
 function SwitchTargetButton() {
+  const { user } = useAuthStore();
   const { targets, setTargets } = useViewTargetStore();
   const [open, setOpen] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
@@ -181,6 +188,10 @@ function SwitchTargetButton() {
 
   const currentLabel =
     targets.length === 0 ? "所有工单" : targets.length === 1 ? targets[0] : `${targets[0]} 等${targets.length}人`;
+
+  // 只有管理员能跨受理人查看，其余角色的可见范围已按登录身份圈死，
+  // 给他们这个按钮只会选完发现列表是空的
+  if (user?.role !== "admin") return null;
 
   return (
     <>
