@@ -1,6 +1,6 @@
 .app-sider {
-  background: linear-gradient(180deg, #eef2ff 0%, #fdf2f8 55%, #fff7ed 100%) !important;
-  border-right: 1px solid rgba(17, 24, 39, 0.06);
+  background: var(--app-sider-gradient) !important;
+  border-right: 1px solid var(--app-border);
 }
 
 .app-logo {
@@ -9,15 +9,15 @@
   align-items: center;
   gap: 8px;
   padding: 0 16px;
-  color: #111827;
-  border-bottom: 1px solid rgba(17, 24, 39, 0.06);
+  color: var(--app-text);
+  border-bottom: 1px solid var(--app-border);
 }
 
 .app-logo-badge {
   width: 26px;
   height: 26px;
   border-radius: 6px;
-  background: #2f54eb;
+  background: var(--app-primary);
   color: #fff;
   display: flex;
   align-items: center;
@@ -44,38 +44,38 @@
 }
 
 .app-sider .ant-layout-sider-trigger {
-  background: #eef2ff;
-  color: #111827;
-  border-top: 1px solid rgba(17, 24, 39, 0.06);
+  background: var(--app-primary-soft);
+  color: var(--app-text);
+  border-top: 1px solid var(--app-border);
 }
 
 .app-header {
-  background: linear-gradient(90deg, #eef2ff 0%, #fdf2f8 55%, #fff7ed 100%);
+  background: var(--app-bar-gradient);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
   height: 56px;
   line-height: 56px;
-  border-bottom: 1px solid rgba(17, 24, 39, 0.06);
+  border-bottom: 1px solid var(--app-border);
 }
 
 .app-header-left :where(.ant-breadcrumb-link) {
-  color: #111827;
+  color: var(--app-text);
   font-size: 14px;
   font-weight: 500;
 }
 
 .app-header-right :where(.ant-typography) {
-  color: #111827;
+  color: var(--app-text);
 }
 
 .app-header-right .ant-btn {
-  color: #111827;
+  color: var(--app-text);
 }
 
 .app-content {
-  background: linear-gradient(135deg, #f3f5ff 0%, #fbf3f8 55%, #fffaf3 100%);
+  background: var(--app-bg-gradient);
   padding: 16px;
   overflow: auto;
 }
@@ -98,11 +98,11 @@
 }
 
 .switch-user-item:hover {
-  background: #f0f2ff;
+  background: var(--app-primary-hover);
 }
 
 .switch-user-item.active {
-  background: #eef2ff;
-  color: #2f54eb;
+  background: var(--app-primary-soft);
+  color: var(--app-primary);
   font-weight: 600;
 }
