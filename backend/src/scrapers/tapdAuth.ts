@@ -23,6 +23,7 @@ import path from "path";
 import readline from "readline";
 import { Browser, BrowserContext, Page, chromium } from "playwright";
 import { config } from "../config";
+import { launchChromiumWithFallback } from "./browserLauncher";
 
 const AUTH_DIR = path.join(__dirname, "../../.auth");
 const STATE_PATH = path.join(AUTH_DIR, "tapd-state.json");
@@ -284,7 +285,7 @@ export async function performInteractiveLogin(): Promise<void> {
 // 自动同步用的浏览器：非无头模式（会弹出真实可见窗口），因为无头模式访问 tapd.cn 会被
 // 安全网关拦截/卡死。全程自动操作，不需要人工干预，只是运行期间窗口会短暂出现在屏幕上
 export async function launchTapdBrowser(): Promise<Browser> {
-  return chromium.launch({
+  return launchChromiumWithFallback({
     headless: false,
     channel: config.tapd.browserChannel,
     // 关掉 Chromium 用来标记"这是被自动化控制的浏览器"的特征位，降低被风控识别为爬虫的概率

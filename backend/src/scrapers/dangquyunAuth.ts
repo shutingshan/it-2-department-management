@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { Browser, BrowserContext, Page, chromium } from "playwright";
 import { config } from "../config";
+import { launchChromiumWithFallback } from "./browserLauncher";
 
 const AUTH_DIR = path.join(__dirname, "../../.auth");
 const STATE_PATH = path.join(AUTH_DIR, "dangquyun-state.json");
@@ -206,7 +207,7 @@ export async function getAuthenticatedContext(browser: Browser): Promise<Browser
 }
 
 export async function launchBrowser(): Promise<Browser> {
-  return chromium.launch({
+  return launchChromiumWithFallback({
     headless: !config.dangquyun.debug,
     channel: config.dangquyun.browserChannel,
   });

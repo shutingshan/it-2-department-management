@@ -161,6 +161,12 @@ export function applyScrapedRows(rows: ScrapedRow[], isFull: boolean) {
 // 获取新工单没有进度轮询的 job 机制，容易在等待时间变长后被误以为"没反应"而重复点击，
 // 导致两次抓取同时跑、共用同一份浏览器登录态文件互相干扰；这里用一个模块级标记防止并发执行
 let fetchNewRunning = false;
+// 「终止任务」按下后置为 true，抓取过程在翻页间隙检查它，尽快停下来
+let fetchNewCancelled = false;
+
+export function cancelFetchNew() {
+  if (fetchNewRunning) fetchNewCancelled = true;
+}
 
 // 获取新工单：供路由与定时任务共用；失败时已在此处记录变更日志并向上抛出。
 // 完成后会把结果写入 store.currentJob（type: fetch_new），供前端沿用既有的悬浮进度弹窗展示
@@ -169,13 +175,29 @@ export async function runFetchNew(actor: string, mode?: "incremental" | "full") 
     throw new Error("已有获取新工单任务在执行中，请等待其完成后再试");
   }
   fetchNewRunning = true;
+  fetchNewCancelled = false;
   const isFull = mode === "full";
   const startedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
+  // 抓取期间就把任务挂出去，导航栏才能显示"进行中"并提供终止入口。
+  // 抓取阶段拿不到总数（要翻完页才知道），total 先给 0，前端按"进行中"展示
+  store.currentJob = {
+    id: `job-${Date.now()}`,
+    type: "fetch_new",
+    status: "running",
+    total: 0,
+    processed: 0,
+    success: 0,
+    failed: 0,
+    startedAt,
+    finishedAt: null,
+    failReasons: [],
+  };
   try {
     // 真实抓取当曲云工单列表（需要 backend/.env 配置好账号密码，见 .env.example）；
     // 增量模式：按"编号"跟工单中心现有数据比对，只新增工单中心里还没有的；
     // 全量模式（用于数据初始化）：已存在的工单也会用当曲云最新数据覆盖已同步字段
-    const result = await scrapeDangquyunTicketList();
+    const result = await scrapeDangquyunTicketList({ shouldCancel: () => fetchNewCancelled });
+    if (fetchNewCancelled) throw new Error("任务被手动终止");
     if (result.strategy === "none") {
       // 地址对了，但三种表格结构都没识别出来（页面改版/选择器失效等）：不能当成"0条新工单"，
       // 否则会跟"这次确实没有新工单"混为一谈，误导使用者以为抓取正常
@@ -218,17 +240,24 @@ export async function runFetchNew(actor: string, mode?: "incremental" | "full") 
     return { addedCount, updatedCount, failedCount, failReasons };
   } catch (e) {
     const message = (e as Error).message ?? "未知错误";
+    // 不论失败还是被终止，都要把挂出去的任务收尾，否则导航栏会一直显示"进行中"
+    if (store.currentJob?.status === "running") {
+      store.currentJob.status = fetchNewCancelled ? "terminated" : "failed";
+      store.currentJob.finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
+      store.currentJob.failReasons = [message];
+    }
     store.addLog({
       type: "获取新工单",
       time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
       actor,
       success: false,
       failReason: message,
-      detail: "获取新工单失败",
+      detail: fetchNewCancelled ? "获取新工单被手动终止" : "获取新工单失败",
     });
     throw e;
   } finally {
     fetchNewRunning = false;
+    fetchNewCancelled = false;
   }
 }
 
@@ -397,11 +426,18 @@ router.post("/update-tickets", (req, res) => {
 });
 
 router.post("/terminate", (req, res) => {
+  // 获取新工单是一段长时间的浏览器抓取，不走 setInterval，需要单独打断
+  cancelFetchNew();
   if (store.currentJob && store.currentJob.status === "running") {
     store.currentJob.status = "terminated";
     store.currentJob.finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
     store.addLog({
-      type: store.currentJob.type === "sync_tapd" ? "同步TAPD" : "更新工单",
+      type:
+        store.currentJob.type === "sync_tapd"
+          ? "同步TAPD"
+          : store.currentJob.type === "fetch_new"
+          ? "获取新工单"
+          : "更新工单",
       time: store.currentJob.finishedAt,
       actor: (req.body as { actor?: string }).actor ?? "未知",
       success: false,

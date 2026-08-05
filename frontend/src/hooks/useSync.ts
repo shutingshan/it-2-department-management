@@ -7,6 +7,9 @@ import type { TicketFilters } from "../pages/TicketCenter/useTickets";
 
 export function useSync(onRefresh?: () => void) {
   const { user } = useAuthStore();
+  // 挂载时的轮询要用到 onRefresh，但它每次渲染都是新函数，直接进依赖会反复重建轮询
+  const onRefreshRef = useRef(onRefresh);
+  onRefreshRef.current = onRefresh;
   const [job, setJob] = useState<SyncJob | null>(null);
   const [lastUpdateTime, setLastUpdateTime] = useState<string>("");
   const [busy, setBusy] = useState(false);
@@ -36,10 +39,16 @@ export function useSync(onRefresh?: () => void) {
     [stopPoll]
   );
 
+  // 进页面时先问一次后端：如果有任务正在跑（别人触发的、或自己刷新过页面），
+  // 要立刻在导航栏显示出来并接着轮询，而不是等到本次会话自己点了按钮才显示
   useEffect(() => {
-    api.get("/sync/status").then((res) => setLastUpdateTime(res.data.lastUpdateTime));
+    api.get("/sync/status").then((res) => {
+      setLastUpdateTime(res.data.lastUpdateTime);
+      if (res.data.job) setJob(res.data.job);
+      if (res.data.job?.status === "running") poll(() => onRefreshRef.current?.());
+    });
     return () => stopPoll();
-  }, [stopPoll]);
+  }, [stopPoll, poll]);
 
   async function fetchNew(mode: "incremental" | "full" = "incremental") {
     if (!user) return;
