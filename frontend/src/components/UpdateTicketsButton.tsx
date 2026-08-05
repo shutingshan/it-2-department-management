@@ -243,9 +243,9 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
     else if (key === "tapd-login") handleTapdLogin();
   };
 
-  // 运行中/刚结束的任务指示器。它不受同步权限影响：任何人都该看得到系统正在跑批，
-  // 点开是进度小窗口，里面带「终止任务」。抓取期间 total 还不知道（要翻完页才有），
-  // 这时只显示"进行中"，不显示 0/0 这种会让人以为卡住的数字
+  // 运行中/刚结束的任务指示器。抓取期间 total 还不知道（要翻完页才有），
+  // 这时只显示"进行中"，不显示 0/0 这种会让人以为卡住的数字。
+  // 只对有同步操作权限的人展示：没有「更新工单」按钮的角色也不该看到任务、更不该终止它
   const jobIndicator = job ? (
     <Popover
       content={progressContent}
@@ -270,8 +270,8 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
     </Popover>
   ) : null;
 
-  // 一个同步操作都没授权（比如需求方）：不展示操作入口，但仍要能看到正在跑的任务
-  if (granted.length === 0) return jobIndicator ? <Space size={8}>{jobIndicator}</Space> : null;
+  // 一个同步操作都没授权（比如需求方）：入口和任务标签都不展示
+  if (granted.length === 0) return null;
 
   return (
     <Space size={8}>

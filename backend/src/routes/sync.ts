@@ -426,6 +426,13 @@ router.post("/update-tickets", (req, res) => {
 });
 
 router.post("/terminate", (req, res) => {
+  // 跟前端"只有能发起同步的人才看得到任务标签"保持一致：一个同步权限都没有的账号
+  // 不能终止别人发起的任务。这里不限定具体是哪一项权限，有任意一项即可
+  const actor = (req.body as { actor?: string }).actor;
+  const account = store.accounts.find((a) => a.name === actor);
+  if (!account || (account.role !== "admin" && !(account.syncPermissions ?? []).length)) {
+    return res.status(403).json({ message: "没有终止同步任务的权限，请联系管理员在账号配置中勾选" });
+  }
   // 获取新工单是一段长时间的浏览器抓取，不走 setInterval，需要单独打断
   cancelFetchNew();
   if (store.currentJob && store.currentJob.status === "running") {
@@ -439,7 +446,7 @@ router.post("/terminate", (req, res) => {
           ? "获取新工单"
           : "更新工单",
       time: store.currentJob.finishedAt,
-      actor: (req.body as { actor?: string }).actor ?? "未知",
+      actor: actor ?? "未知",
       success: false,
       failReason: "任务被手动终止",
       detail: `已处理 ${store.currentJob.processed}/${store.currentJob.total}`,
