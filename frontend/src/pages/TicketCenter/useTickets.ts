@@ -14,6 +14,7 @@ export interface TicketFilters {
   monthlyPlan?: string[];
   iteration?: string[];
   owningApp?: string[];
+  category?: string[];
   requesterDept?: string[];
   requester?: string[];
   watcher?: string[];
@@ -31,6 +32,7 @@ export interface Facets {
   monthlyPlans: string[];
   iterations: string[];
   owningApps: string[];
+  categories: string[];
 }
 
 const EMPTY_FACETS: Facets = {
@@ -41,6 +43,7 @@ const EMPTY_FACETS: Facets = {
   monthlyPlans: [],
   iterations: [],
   owningApps: [],
+  categories: [],
 };
 
 export function useTickets(filters: TicketFilters, page: number, pageSize: number, refreshKey: number) {

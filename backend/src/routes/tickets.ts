@@ -67,6 +67,7 @@ router.get("/", (req, res) => {
       facetSource("iteration").flatMap((t) => t.iterations.map((i) => stripCurrentIterationTag(i.name)))
     ).sort(),
     owningApps: dedupe(facetSource("owningApp").map((t) => t.owningApp)).sort(),
+    categories: dedupe(facetSource("category").map((t) => t.category)).sort(),
   };
 
   res.json({ data: pageData, total: filtered.length, facets, lastUpdateTime: store.lastUpdateTime });
