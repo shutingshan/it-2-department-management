@@ -389,7 +389,7 @@ router.post("/terminate", (req, res) => {
 
 // 把抓到的TAPD字段应用到工单上并按需重新计算工单阶段；批量任务和单条同步共用同一份逻辑，
 // 避免两处各写一套导致字段口径不一致。各字段"取不到就保持工单原值不动"，不会用空值覆盖
-function applyTapdFields(ticket: Ticket, fields: TapdStoryFields) {
+export function applyTapdFields(ticket: Ticket, fields: TapdStoryFields) {
   // TAPD 上确认没填的字段：工单里也要跟着清空，保证两边一致（界面上即显示为"-"）。
   // 只有"抓取失败没读到"的字段才保持工单原值不动
   const isEmptyOnTapd = (name: string) => fields.emptyFields.includes(name);

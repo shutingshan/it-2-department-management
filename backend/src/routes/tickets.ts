@@ -83,7 +83,23 @@ router.get("/:id", (req, res) => {
 });
 
 // 紧急、备注两个字段所有角色均可实时编辑，其余字段暂不支持通用编辑
-const EDITABLE_FIELDS = ["urgent", "remark"] as const;
+const EDITABLE_FIELDS = ["urgent", "remark", "monthlyPlan"] as const;
+// 仅管理员可编辑的字段。月度计划是从 TAPD 同步过来的字段，放开给管理员是为了
+// 在 TAPD 还没维护好时能先手工补上；它仍会被下一次「获取TAPD信息」按 TAPD 的值覆盖
+const ADMIN_ONLY_FIELDS: string[] = ["monthlyPlan"];
+// 数组字段：接受数组或「、,，」分隔的字符串，统一清洗成去重后的字符串数组
+const ARRAY_FIELDS: string[] = ["monthlyPlan"];
+
+function normalizeFieldValue(key: string, raw: unknown): unknown {
+  if (!ARRAY_FIELDS.includes(key)) return raw;
+  const list = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/[、,，]/) : [];
+  return dedupe(list.map((v) => String(v).trim()).filter(Boolean));
+}
+
+// 变更日志里数组按「、」展示，避免记成 "a,b" 这种不好读的形式；空数组记成 "-"
+function displayValue(v: unknown): string {
+  return Array.isArray(v) ? v.join("、") || "-" : String(v);
+}
 
 router.patch("/:id", (req, res) => {
   const ticket = store.getTicket(req.params.id);
@@ -109,8 +125,12 @@ router.patch("/:id", (req, res) => {
     if (!EDITABLE_FIELDS.includes(key as any)) {
       return res.status(400).json({ message: `字段校验失败：${key} 不可编辑` });
     }
-    const oldValue = String((ticket as any)[key]);
-    const newValue = String((fields as any)[key]);
+    if (ADMIN_ONLY_FIELDS.includes(key) && actorRole !== "admin") {
+      return res.status(403).json({ message: `无权限：${key} 仅管理员可编辑` });
+    }
+    const normalized = normalizeFieldValue(key, (fields as any)[key]);
+    const oldValue = displayValue((ticket as any)[key]);
+    const newValue = displayValue(normalized);
     if (oldValue !== newValue) {
       changeEntries.push({
         field: key,
@@ -119,7 +139,7 @@ router.patch("/:id", (req, res) => {
         time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
         actor,
       });
-      (ticket as any)[key] = (fields as any)[key];
+      (ticket as any)[key] = normalized;
     }
   }
   store.addChangeLog(ticket, changeEntries);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Dropdown, Input, Pagination, Popconfirm, Popover, Space, Table, Tag, Typography, message } from "antd";
+import { Button, Dropdown, Input, Pagination, Popconfirm, Popover, Select, Space, Table, Tag, Typography, message } from "antd";
 import { CopyOutlined, DeleteOutlined, ExportOutlined } from "@ant-design/icons";
 import type { ColumnsType, ColumnType } from "antd/es/table";
 import {
@@ -162,6 +162,65 @@ function InlineRemarkInput({ ticket, onSaved }: { ticket: Ticket; onSaved: () =>
       onChange={(e) => setValue(e.target.value)}
       onBlur={commit}
       onPressEnter={(e) => (e.target as HTMLInputElement).blur()}
+    />
+  );
+}
+
+// 月度计划：仅管理员可在列表里直接维护，用于 TAPD 上还没填时先手工补上。
+// 注意它仍归 TAPD 管——下一次「获取TAPD信息」会按 TAPD 的值直接覆盖，
+// TAPD 上是空的就会被清空，这里的手工值不做保护，是有意为之
+function InlineMonthlyPlanInput({
+  ticket,
+  options,
+  onSaved,
+}: {
+  ticket: Ticket;
+  options: string[];
+  onSaved: () => void;
+}) {
+  const { user } = useAuthStore();
+  const [value, setValue] = useState<string[]>(ticket.monthlyPlan);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => setValue(ticket.monthlyPlan), [ticket.monthlyPlan]);
+
+  if (user?.role !== "admin") {
+    return <>{ticket.monthlyPlan.join("、") || "-"}</>;
+  }
+
+  async function commit(next: string[]) {
+    if (!user) return;
+    const cleaned = Array.from(new Set(next.map((v) => v.trim()).filter(Boolean)));
+    if (cleaned.join("、") === ticket.monthlyPlan.join("、")) return;
+    setSaving(true);
+    try {
+      await api.patch(`/tickets/${ticket.id}`, {
+        fields: { monthlyPlan: cleaned },
+        actor: user.name,
+        actorRole: user.role,
+      });
+      onSaved();
+    } catch (e: any) {
+      message.error(e?.response?.data?.message ?? "月度计划保存失败");
+      setValue(ticket.monthlyPlan);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Select
+      size="small"
+      mode="tags"
+      style={{ width: "100%" }}
+      placeholder="填写月度计划"
+      disabled={saving}
+      value={value}
+      options={options.map((v) => ({ value: v, label: v }))}
+      onChange={setValue}
+      onBlur={() => commit(value)}
+      maxTagCount={1}
+      tokenSeparators={["、", ",", "，"]}
     />
   );
 }
@@ -444,9 +503,12 @@ export default function TicketCenter() {
       monthlyPlan: {
         title: "月度计划",
         dataIndex: "monthlyPlan",
-        width: 120,
-        ellipsis: true,
-        render: (v: string[]) => v.join("、") || "-",
+        width: 160,
+        // 下拉候选取自当前列表已有的月度计划值（facets 由后端按当前筛选范围算出），
+        // 同时是 tags 模式，列表里还没出现过的新值也能直接输入
+        render: (_: string[], r: Ticket) => (
+          <InlineMonthlyPlanInput ticket={r} options={facets.monthlyPlans} onSaved={reload} />
+        ),
       },
       iterations: {
         title: "迭代",
@@ -479,7 +541,7 @@ export default function TicketCenter() {
       submittedAt: { title: "提交时间", dataIndex: "submittedAt", width: 140 },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [reload]
+    [reload, facets.monthlyPlans]
   );
 
   const columns: ColumnsType<Ticket> = [
