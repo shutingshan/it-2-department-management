@@ -5,6 +5,7 @@ import { api } from "../../api/client";
 import { formatIterations, hoursDeviation, STAGE_COLORS } from "../../api/types";
 import type { Ticket } from "../../api/types";
 import { useAuthStore } from "../../store/auth";
+import { copyText } from "../../utils/clipboard";
 
 export default function DetailModal({
   ticketId,
@@ -83,9 +84,10 @@ export default function DetailModal({
             size="small"
             type="text"
             icon={<CopyOutlined />}
-            onClick={() => {
-              navigator.clipboard.writeText(ticket.code);
-              message.success("已复制编号");
+            onClick={async () => {
+              const ok = await copyText(ticket.code);
+              if (ok) message.success(`已复制编号 ${ticket.code}`);
+              else message.error("复制失败，请手动选中编号复制");
             }}
           />
           <Tag color={STAGE_COLORS[ticket.stage]}>{ticket.stage}</Tag>

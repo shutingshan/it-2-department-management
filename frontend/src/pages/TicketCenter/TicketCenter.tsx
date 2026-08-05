@@ -25,6 +25,7 @@ import DetailModal from "./DetailModal";
 import StatCards from "./StatCards";
 import SubTicketsModal from "./SubTicketsModal";
 import DraggableHeaderCell from "./DraggableHeaderCell";
+import { copyText } from "../../utils/clipboard";
 import "./TicketCenter.css";
 
 const FIXED_LEFT_KEYS = ["code", "tapdUrl", "owningApp", "requester", "title"];
@@ -432,9 +433,10 @@ export default function TicketCenter() {
             <a onClick={() => openDetail(r.id)}>{code}</a>
             <CopyOutlined
               style={{ color: "#8c8c8c", cursor: "pointer" }}
-              onClick={() => {
-                navigator.clipboard.writeText(code);
-                message.success("已复制编号");
+              onClick={async () => {
+                const ok = await copyText(code);
+                if (ok) message.success(`已复制编号 ${code}`);
+                else message.error("复制失败，请手动选中编号复制");
               }}
             />
           </Space>
