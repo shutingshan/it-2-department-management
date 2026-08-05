@@ -8,6 +8,7 @@ import { ChangeLogEntry } from "../types";
 
 const router = Router();
 
+
 // 工单中心统计卡片数据，需在 "/:id" 之前注册，避免被当成 id 参数捕获。
 // 支持按 itHandler 圈定范围（"切换人员"选中目标后，卡片数量也要跟着只统计这些人的工单，
 // 不传时统计全部工单）——只认 itHandler 这一个维度，不跟列表当前的其余筛选条件联动，
@@ -17,7 +18,9 @@ router.get("/card-stats", (req, res) => {
   const { actor, actorRole } = req.query as { actor?: string; actorRole?: string };
   // 先按登录身份圈定可见范围（IT受理人只看自己负责的、需求方只看跟自己相关的），
   // 再叠加"切换人员"选中的目标——否则卡片数量会大于该身份实际能在列表里看到的工单数
-  const scoped = scopeForActor(store.tickets, actor, actorRole);
+  // 分类显示范围要和列表用同一个口径，否则卡片数量会大于列表里实际能看到的条数
+  const visible = store.visibleTickets;
+  const scoped = scopeForActor(visible, actor, actorRole);
   const tickets = itHandler?.length ? scoped.filter((t) => itHandler.includes(t.itHandler)) : scoped;
   res.json({ data: computeCardStats(tickets) });
 });
@@ -43,7 +46,7 @@ router.get("/codes", (_req, res) => {
 router.get("/", (req, res) => {
   const q = parseQuery(req.query as Record<string, unknown>);
   const { actor, actorRole } = req.query as { actor?: string; actorRole?: string };
-  const scoped = scopeForActor(store.tickets, actor, actorRole);
+  const scoped = scopeForActor(store.visibleTickets, actor, actorRole);
   const filtered = applyFilters(scoped, q);
 
   const page = Number(req.query.page ?? 1);

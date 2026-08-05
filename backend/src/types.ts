@@ -41,6 +41,14 @@ export const SYNC_PERMISSIONS: { key: SyncPermission; label: string }[] = [
   { key: "tapd-login", label: "TAPD扫码登录" },
 ];
 
+// 范围配置项。两处用途互相独立，配置为空都表示"不限制"（避免升级后老部署行为突变）：
+// - 受理人范围：「获取新工单」「全量获取」时只导入这些受理人的工单
+// - 分类范围：工单中心的显示范围，列表、统计卡片、导出三者口径一致
+export interface ScopeConfigItem {
+  id: string;
+  value: string;
+}
+
 export interface Account {
   id: string;
   userId: string; // 关联 USERS 中的人员记录，姓名/拼音码/部门等信息取自该记录

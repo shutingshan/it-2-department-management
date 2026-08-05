@@ -125,6 +125,13 @@ export function isSameYear(dateStr: string | null, year: number): boolean {
 // 按登录身份圈定可见范围（管理员不受限，能看全部）：
 // - 需求方：只看自己发起的、或把自己列为关注人的工单
 // - IT受理人：只看 IT受理人 是自己的工单
+// 工单中心的显示范围：分类范围配置非空时，只显示配置里的分类。
+// 列表、统计卡片、导出都要走这里，否则会出现「卡片数量跟列表条数对不上」
+export function applyDisplayScope(tickets: Ticket[], categories: string[]): Ticket[] {
+  if (!categories.length) return tickets;
+  return tickets.filter((t) => categories.includes(t.category));
+}
+
 export function scopeForActor(tickets: Ticket[], actor?: string, actorRole?: string): Ticket[] {
   if (!actor) return tickets;
   if (actorRole === "requester") {

@@ -3,7 +3,8 @@ import path from "path";
 import { v4 as uuid } from "uuid";
 import { DEPARTMENTS, SEED_ADMIN, generateAccounts } from "./seed";
 import { buildUserDirectory } from "./userDirectory";
-import { Account, ChangeLogEntry, Department, InSiteMessage, LogEntry, Ticket, User } from "./types";
+import { applyDisplayScope } from "./filter";
+import { Account, ChangeLogEntry, Department, ScopeConfigItem, InSiteMessage, LogEntry, Ticket, User } from "./types";
 
 // 工单/处理记录/站内信/同步日志是真实业务数据（不是每次启动都重新生成的模拟数据），
 // 必须落盘持久化，否则进程一重启（比如 ts-node-dev 检测到文件变化自动重启）就会全部丢失。
@@ -23,6 +24,9 @@ interface PersistedState {
   // 一旦把它也落盘，以后更新 seed.ts 里的人员名单反而会被旧的落盘数据盖住、不生效
   departments: Department[];
   accounts: Account[];
+  // 范围配置：受理人（取数范围）/ 分类（工单中心显示范围），页面上可增删改，必须落盘
+  fetchScopeHandlers: ScopeConfigItem[];
+  displayCategories: ScopeConfigItem[];
 }
 
 interface SyncJob {
@@ -58,6 +62,8 @@ class Store {
   // 每日定时同步"今天是否已经跑过"的标记，必须落盘——否则每次重启后端都会清零，
   // 一旦重启时北京时间已过18:30，就会被误判成"今天还没跑过"而立刻重新触发一次
   lastScheduledSyncDate: string | null = null;
+  fetchScopeHandlers: ScopeConfigItem[] = [];
+  displayCategories: ScopeConfigItem[] = [];
 
   constructor() {
     this.load();
@@ -83,6 +89,9 @@ class Store {
       // 不能又被 seed 数据填回来
       this.departments = parsed.departments ?? DEPARTMENTS;
       this.accounts = parsed.accounts ?? generateAccounts();
+      // 老的 store.json 里没有这两个键，回退到空数组＝不限制，保持升级前的行为
+      this.fetchScopeHandlers = parsed.fetchScopeHandlers ?? [];
+      this.displayCategories = parsed.displayCategories ?? [];
 
       // 兜底：管理员账号是锁定的、页面上删不掉，但万一落盘数据被手工改坏导致一个管理员都没有，
       // 就会彻底登不进系统、也没有任何入口能把它加回来。这里补一个回去，避免被锁在门外
@@ -110,6 +119,8 @@ class Store {
         lastScheduledSyncDate: this.lastScheduledSyncDate,
         departments: this.departments,
         accounts: this.accounts,
+        fetchScopeHandlers: this.fetchScopeHandlers,
+        displayCategories: this.displayCategories,
       };
       const tmpFile = `${DATA_FILE}.tmp`;
       fs.writeFileSync(tmpFile, JSON.stringify(state));
@@ -117,6 +128,15 @@ class Store {
     } catch (e) {
       console.error(`[store] 持久化数据失败（${DATA_FILE}）：`, (e as Error).message);
     }
+  }
+
+  /**
+   * 工单中心与各看板统一的可见数据源：按「分类显示范围」配置收敛后的工单。
+   * 列表、统计卡片、导出、首页/开发工时/部门统计都必须用它，
+   * 否则会出现"看板数量跟列表对不上"。配置为空时返回全部。
+   */
+  get visibleTickets(): Ticket[] {
+    return applyDisplayScope(this.tickets, this.displayCategories.map((i) => i.value));
   }
 
   getTicket(id: string) {

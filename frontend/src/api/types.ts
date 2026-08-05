@@ -25,6 +25,15 @@ export const SYNC_PERMISSIONS: { key: SyncPermission; label: string }[] = [
   { key: "tapd-login", label: "TAPD扫码登录" },
 ];
 
+// 取数与显示范围配置项（跟后端 types.ts 的 ScopeConfigItem 对应）
+export interface ScopeConfigItem {
+  id: string;
+  value: string;
+}
+
+// handlers=获取工单受理人范围；categories=工单中心显示分类
+export type ScopeKind = "handlers" | "categories";
+
 export interface Account {
   id: string;
   userId: string;

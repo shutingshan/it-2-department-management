@@ -110,7 +110,8 @@ router.post("/", async (req, res) => {
 
   // 导出范围必须跟列表一致：IT受理人只导自己负责的、需求方只导跟自己相关的，
   // 否则"全量导出"会把这些角色在列表里根本看不到的工单一并导出去
-  const visible = scopeForActor(store.tickets, actor, actorRole);
+  // 导出范围跟列表保持一致：先按分类显示范围收敛，再按登录身份圈定
+  const visible = scopeForActor(store.visibleTickets, actor, actorRole);
   const stamp = dayjs().format("YYYYMMDD_HHmm");
 
   if (scope === "selected") {
