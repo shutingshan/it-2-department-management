@@ -736,25 +736,29 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
 
   (async () => {
     let session: { browser: Browser; page: Page } | null = null;
+
+    const abortJob = (reason: string, detail: string) => {
+      job.status = "failed";
+      job.finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
+      job.failReasons.push(reason);
+      store.addLog({
+        type: "同步TAPD",
+        time: job.finishedAt,
+        actor,
+        success: false,
+        failReason: reason,
+        detail,
+      });
+      finishJob(job);
+    };
+
     if (config.tapd.fetchMode === "browser" && candidates.length > 0) {
       try {
         session = await launchSharedTapdSession();
       } catch (e) {
         // 登录态无效/已过期：整单终止，不逐条去撞同一个错误——否则每条工单都会失败一次，
         // 失败原因刷满一屏，还白白开关一堆浏览器窗口
-        const reason = (e as Error).message ?? "TAPD 尚未登录";
-        job.status = "failed";
-        job.finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
-        job.failReasons.push(reason);
-        store.addLog({
-          type: "同步TAPD",
-          time: job.finishedAt,
-          actor,
-          success: false,
-          failReason: reason,
-          detail: "同步 TAPD 终止：需要重新扫码登录",
-        });
-        finishJob(job);
+        abortJob((e as Error).message ?? "TAPD 尚未登录", "同步 TAPD 终止：需要重新扫码登录");
         return;
       }
     }
@@ -771,12 +775,32 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
           job.processed += 1;
           continue;
         }
+        // 浏览器模式下必须始终复用同一个会话。会话不可用时先重建一次，重建再失败就整单终止——
+        // 绝不能退化成"每条工单单独开一个浏览器"：那会在几百毫秒内连开几十个 Chrome，
+        // macOS 上会把 crashpad 的 Mach 服务注册撑爆（bootstrap_check_in 失败 -> SIGABRT），
+        // 表现为每条工单都报 browserType.launch 失败，看上去像是工单本身有问题
+        if (config.tapd.fetchMode === "browser" && (!session || session.page.isClosed())) {
+          try {
+            if (session) await session.browser.close().catch(() => {});
+            session = await launchSharedTapdSession();
+          } catch (e) {
+            const reason = (e as Error).message ?? "未知错误";
+            abortJob(
+              `TAPD 浏览器会话无法建立，已终止本次同步（已处理 ${job.processed}/${job.total}）：${reason}`,
+              "同步 TAPD 终止：浏览器会话无法建立"
+            );
+            await session?.browser.close().catch(() => {});
+            return;
+          }
+        }
+
         ticketsSyncingTapd.add(ticket.id);
         try {
-          const fields =
-            session && !session.page.isClosed()
-              ? await scrapeTapdStoryFields(session.page, ticket.tapdUrl!)
-              : await fetchTapdFields(ticket.tapdUrl!);
+          // 浏览器模式下 session 必定可用（上面的守卫保证，不可用时已整单终止）；
+          // session 为 null 只可能是开放平台 API 模式，那条路不涉及浏览器
+          const fields = session
+            ? await scrapeTapdStoryFields(session.page, ticket.tapdUrl!)
+            : await fetchTapdFields(ticket.tapdUrl!);
           applyTapdFields(ticket, fields);
           ticket.tapdErrorNote = null; // 本次同步成功，清除历史异常标记
           job.success += 1;
@@ -786,12 +810,8 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
           job.failReasons.push(`${ticket.code}: ${reason}`);
           // 按条更新：更新失败记录到 TAPD 异常备注字段，保留时间与原因
           ticket.tapdErrorNote = { time: dayjs().format("YYYY-MM-DD HH:mm:ss"), message: reason };
-          // 复用的页面可能因为这次失败而报废（比如窗口被意外关闭），检测到就丢弃重开一个，
-          // 避免这条工单的问题连累后面所有工单都跟着失败
-          if (session && session.page.isClosed()) {
-            await session.browser.close().catch(() => {});
-            session = await launchSharedTapdSession();
-          }
+          // 复用的页面可能因为这次失败而报废（比如窗口被意外关闭）。这里不重建，
+          // 交给下一轮循环开头统一处理：那里重建失败会整单终止，不会无限重试
         } finally {
           ticketsSyncingTapd.delete(ticket.id);
         }
