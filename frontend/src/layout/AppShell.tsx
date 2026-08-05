@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Avatar, Breadcrumb, Button, Checkbox, Layout, Menu, Modal, Space, Tooltip, Typography } from "antd";
 import {
@@ -34,13 +34,22 @@ const BASE_MENU_ITEMS = [
 ];
 
 export default function AppShell() {
-  const { user, logout } = useAuthStore();
+  const { user, logout, refreshSession } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
   const setViewTargets = useViewTargetStore((s) => s.setTargets);
   const [refreshTick, setRefreshTick] = useState(0);
   // 侧边栏默认收起，把横向空间尽量留给工单列表（列很多，需要横向滚动）
   const [collapsed, setCollapsed] = useState(true);
+  // 必须放在下面 user 为空的早退之前：早退后再调用 Hook，会在
+  // 登录态从"有"变成"无"时（如刷新会话发现账号已被取消授权）让本次渲染
+  // 少调用一个 Hook，React 直接抛错、整页白屏
+  const themeMode = useThemeStore((s) => s.mode);
+
+  // 进入应用时用后端最新的账号信息刷新本地会话，避免一直用着登录当时的旧数据
+  useEffect(() => {
+    refreshSession();
+  }, [refreshSession]);
 
   if (!user) {
     return <Navigate to="/login" replace />;
@@ -73,7 +82,6 @@ export default function AppShell() {
     });
   }
 
-  const themeMode = useThemeStore((s) => s.mode);
   const activeMenu = MENU_ITEMS.find((m) => location.pathname.startsWith(m.key));
   const activeKey = activeMenu?.key ?? "/tickets";
   const activeLabel = activeMenu?.label ?? "工单中心";
