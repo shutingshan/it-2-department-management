@@ -215,6 +215,8 @@ export default function TicketCenter() {
   // 手动删除：勾选的工单 id，以及删除请求进行中的标记
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
   const [deleting, setDeleting] = useState(false);
+  // 正在导出的菜单项 key，用于给「导出」按钮加 loading，避免大数据量时以为没点上而重复点
+  const [exporting, setExporting] = useState<string | null>(null);
 
   // 表格高度不能写死：统计卡片、筛选栏（选中条件多时会换行）的高度都是变的。
   // 这里实测表格容器剩余的可用高度，减掉表头后作为表体的滚动高度，
@@ -308,15 +310,45 @@ export default function TicketCenter() {
     }
   }
 
-  // groupBy：requester=按发起人（原有逻辑），itHandler=按IT受理人
-  async function handleExport(groupBy: "requester" | "itHandler") {
-    const res = await api.post("/export", { ...filters, groupBy }, { responseType: "blob" });
-    const url = URL.createObjectURL(res.data);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "IT二部工单数据.zip";
-    a.click();
-    URL.revokeObjectURL(url);
+  // all=按当前筛选全量导出（单个 xlsx）；selected=只导勾选的（单个 xlsx）；
+  // requester/itHandler=按人分组导出，每人一个文件打成 zip
+  async function handleExport(key: "all" | "selected" | "requester" | "itHandler") {
+    if (key === "selected" && selectedRowKeys.length === 0) {
+      message.warning("请先在列表中勾选要导出的工单");
+      return;
+    }
+    const body: Record<string, unknown> = { ...filters, actor: user?.name, actorRole: user?.role };
+    if (key === "all" || key === "selected") body.scope = key;
+    else body.groupBy = key;
+    if (key === "selected") body.ids = selectedRowKeys;
+
+    setExporting(key);
+    try {
+      const res = await api.post("/export", body, { responseType: "blob" });
+      // 文件名由后端给出（含条数与时间戳），拿不到再退回一个默认名
+      const disposition = res.headers["content-disposition"] as string | undefined;
+      const matched = disposition?.match(/filename="?([^";]+)"?/);
+      const isZip = key === "requester" || key === "itHandler";
+      const fallback = `IT二部工单数据.${isZip ? "zip" : "xlsx"}`;
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = matched ? decodeURIComponent(matched[1]) : fallback;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      // responseType 是 blob，报错信息也是 blob，要读出来才拿得到后端的提示文案
+      let msg = "导出失败";
+      try {
+        const text = await (e?.response?.data as Blob)?.text?.();
+        msg = text ? JSON.parse(text).message ?? msg : msg;
+      } catch {
+        // 解析不出来就用兜底文案
+      }
+      message.error(msg);
+    } finally {
+      setExporting(null);
+    }
   }
 
   function handleDragEnd(event: DragEndEvent) {
@@ -511,14 +543,21 @@ export default function TicketCenter() {
             <Dropdown
               menu={{
                 items: [
+                  { key: "all", label: "全量导出（按当前筛选）" },
+                  {
+                    key: "selected",
+                    label: `导出所选数据${selectedRowKeys.length ? `（${selectedRowKeys.length}）` : ""}`,
+                    disabled: selectedRowKeys.length === 0,
+                  },
+                  { type: "divider" },
                   { key: "requester", label: "按发起人导出" },
                   { key: "itHandler", label: "按IT受理人导出" },
                 ],
-                onClick: ({ key }) => handleExport(key as "requester" | "itHandler"),
+                onClick: ({ key }) => handleExport(key as "all" | "selected" | "requester" | "itHandler"),
               }}
               trigger={["click"]}
             >
-              <Button size="small" icon={<ExportOutlined />}>
+              <Button size="small" icon={<ExportOutlined />} loading={!!exporting}>
                 导出
               </Button>
             </Dropdown>
@@ -556,16 +595,13 @@ export default function TicketCenter() {
               dataSource={data}
               columns={columns}
               pagination={false}
-              // 勾选后可手动删除，仅管理员需要这个能力，其余角色不显示勾选框
-              rowSelection={
-                user?.role === "admin"
-                  ? {
-                      fixed: true,
-                      selectedRowKeys,
-                      onChange: (keys) => setSelectedRowKeys(keys as string[]),
-                    }
-                  : undefined
-              }
+              // 勾选用于「导出所选数据」（所有角色可用）与「删除选中」（仅管理员，
+              // 删除按钮本身另有角色判断，这里不再限制勾选框的显示）
+              rowSelection={{
+                fixed: true,
+                selectedRowKeys,
+                onChange: (keys) => setSelectedRowKeys(keys as string[]),
+              }}
               sticky
               scroll={{ x: scrollX, y: tableScrollY }}
               rowClassName={(r) => (r.urgent.trim() ? "row-urgent" : "")}
