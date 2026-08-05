@@ -1,7 +1,7 @@
 import { Router } from "express";
 import dayjs from "dayjs";
 import { backupStoreFile, store } from "../store";
-import { applyFilters, canViewTicket, parseQuery, scopeForActor } from "../filter";
+import { applyFilters, canViewTicket, parseQuery, scopeForActor, TicketQuery } from "../filter";
 import { dedupe, stripCurrentIterationTag } from "../mapping";
 import { computeCardStats } from "../cards";
 import { ChangeLogEntry } from "../types";
@@ -51,15 +51,22 @@ router.get("/", (req, res) => {
   const start = (page - 1) * pageSize;
   const pageData = filtered.slice(start, start + pageSize);
 
-  // 下拉候选值以当前筛选结果为边界，不越界到全量数据
+  // 下拉候选值以当前筛选结果为边界，不越界到全量数据；但每个下拉自己的那一项要排除掉，
+  // 否则多选没法用：比如选了月度计划「2026-06」后，结果里只剩带该月份的工单，
+  // 候选值跟着收缩成只有「2026-06」，想再加选一个月份根本点不到。
+  // 每个下拉按「除它自己以外的其余筛选条件」算候选，是多条件筛选的通行做法
+  const facetSource = (omit: keyof TicketQuery) => applyFilters(scoped, { ...q, [omit]: undefined });
   const facets = {
-    requesters: dedupe(filtered.map((t) => t.requester)).sort(),
-    watchers: dedupe(filtered.flatMap((t) => t.watcher)).sort(),
-    itHandlers: dedupe(filtered.map((t) => t.itHandler)).sort(),
+    requesters: dedupe(facetSource("requester").map((t) => t.requester)).sort(),
+    watchers: dedupe(facetSource("watcher").flatMap((t) => t.watcher)).sort(),
+    itHandlers: dedupe(facetSource("itHandler").map((t) => t.itHandler)).sort(),
+    // 开发人员没有对应的筛选项，直接用当前结果即可
     developers: dedupe(filtered.flatMap((t) => t.developer)).sort(),
-    monthlyPlans: dedupe(filtered.flatMap((t) => t.monthlyPlan)).sort(),
-    iterations: dedupe(filtered.flatMap((t) => t.iterations.map((i) => stripCurrentIterationTag(i.name)))).sort(),
-    owningApps: dedupe(filtered.map((t) => t.owningApp)).sort(),
+    monthlyPlans: dedupe(facetSource("monthlyPlan").flatMap((t) => t.monthlyPlan)).sort(),
+    iterations: dedupe(
+      facetSource("iteration").flatMap((t) => t.iterations.map((i) => stripCurrentIterationTag(i.name)))
+    ).sort(),
+    owningApps: dedupe(facetSource("owningApp").map((t) => t.owningApp)).sort(),
   };
 
   res.json({ data: pageData, total: filtered.length, facets, lastUpdateTime: store.lastUpdateTime });
