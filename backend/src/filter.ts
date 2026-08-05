@@ -29,6 +29,16 @@ function toArray(v: unknown): string[] | undefined {
   return String(v).split(",").filter(Boolean);
 }
 
+// 布尔筛选项要兼容两种来源：列表走 GET，参数从查询串来，拿到的是字符串 "true"/"false"；
+// 「更新工单」「获取TAPD信息」把筛选条件放在 JSON body 里传，拿到的是真正的布尔值。
+// 只判断字符串的话，后者会被当成没填而整条筛选被忽略，导致同步范围比列表里看到的大
+function toBool(v: unknown): boolean | undefined {
+  if (typeof v === "boolean") return v;
+  if (v === "true") return true;
+  if (v === "false") return false;
+  return undefined;
+}
+
 export function parseQuery(q: Record<string, unknown>): TicketQuery {
   return {
     search: q.search ? String(q.search).trim() : undefined,
@@ -36,7 +46,7 @@ export function parseQuery(q: Record<string, unknown>): TicketQuery {
     submittedTo: q.submittedTo ? String(q.submittedTo) : undefined,
     stage: toArray(q.stage),
     status: toArray(q.status),
-    urgent: q.urgent === "true" ? true : q.urgent === "false" ? false : undefined,
+    urgent: toBool(q.urgent),
     monthlyPlan: toArray(q.monthlyPlan),
     iteration: toArray(q.iteration),
     owningApp: toArray(q.owningApp),
@@ -44,7 +54,7 @@ export function parseQuery(q: Record<string, unknown>): TicketQuery {
     requester: toArray(q.requester),
     watcher: toArray(q.watcher),
     itHandler: toArray(q.itHandler),
-    hasTapd: q.hasTapd === "true" ? true : q.hasTapd === "false" ? false : undefined,
+    hasTapd: toBool(q.hasTapd),
     cardKey: q.cardKey ? String(q.cardKey) : undefined,
     sortField: q.sortField ? String(q.sortField) : "submittedAt",
     sortOrder: q.sortOrder === "asc" ? "asc" : "desc",
