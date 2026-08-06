@@ -13,6 +13,7 @@ export interface TicketQuery {
   monthlyPlan?: string[];
   iteration?: string[];
   owningApp?: string[];
+  category?: string[];
   requesterDept?: string[];
   requester?: string[];
   watcher?: string[];
@@ -50,6 +51,7 @@ export function parseQuery(q: Record<string, unknown>): TicketQuery {
     monthlyPlan: toArray(q.monthlyPlan),
     iteration: toArray(q.iteration),
     owningApp: toArray(q.owningApp),
+    category: toArray(q.category),
     requesterDept: toArray(q.requesterDept),
     requester: toArray(q.requester),
     watcher: toArray(q.watcher),
@@ -97,6 +99,7 @@ export function applyFilters(tickets: Ticket[], q: TicketQuery): Ticket[] {
       t.iterations.some((i) => q.iteration!.includes(stripCurrentIterationTag(i.name)))
     );
   if (q.owningApp?.length) result = result.filter((t) => q.owningApp!.includes(t.owningApp));
+  if (q.category?.length) result = result.filter((t) => q.category!.includes(t.category));
   if (q.requesterDept?.length) result = result.filter((t) => q.requesterDept!.includes(t.requesterDept));
   if (q.requester?.length) result = result.filter((t) => q.requester!.includes(t.requester));
   if (q.watcher?.length) result = result.filter((t) => t.watcher.some((w) => q.watcher!.includes(w)));

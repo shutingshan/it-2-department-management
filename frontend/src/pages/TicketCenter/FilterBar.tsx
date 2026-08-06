@@ -169,6 +169,19 @@ export default function FilterBar({
           size="small"
           mode="multiple"
           allowClear
+          placeholder="分类"
+          style={{ minWidth: 110 }}
+          showSearch
+          // 候选值同样由后端按当前筛选范围去重给出（facets），不写死枚举
+          options={facets.categories.map((v) => ({ value: v, label: v }))}
+          value={filters.category}
+          onChange={(v) => set("category", v.length ? v : undefined)}
+          maxTagCount={1}
+        />
+        <Select
+          size="small"
+          mode="multiple"
+          allowClear
           placeholder="紧急"
           style={{ minWidth: 80 }}
           options={YES_NO_OPTIONS}
