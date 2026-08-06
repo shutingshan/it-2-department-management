@@ -8,6 +8,7 @@ import DeptStats from "./pages/DeptStats/DeptStats";
 import AccountConfig from "./pages/AccountConfig/AccountConfig";
 import ChangeLogs from "./pages/ChangeLogs/ChangeLogs";
 import DeptConfig from "./pages/DeptConfig/DeptConfig";
+import ScopeConfig from "./pages/ScopeConfig/ScopeConfig";
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
         <Route path="account-config" element={<AccountConfig />} />
         <Route path="change-logs" element={<ChangeLogs />} />
         <Route path="dept-config" element={<DeptConfig />} />
+        <Route path="scope-config" element={<ScopeConfig />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

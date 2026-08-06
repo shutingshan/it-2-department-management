@@ -14,6 +14,7 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
   const { filters } = useFilteredTicketsStore();
   const [progressOpen, setProgressOpen] = useState(false);
   const [tapdModalOpen, setTapdModalOpen] = useState(false);
+  const [terminating, setTerminating] = useState(false);
   const [tapdCode, setTapdCode] = useState<string | undefined>(undefined);
   const [tapdCodeOptions, setTapdCodeOptions] = useState<string[]>([]);
   const [singleSyncing, setSingleSyncing] = useState(false);
@@ -173,7 +174,9 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
           </div>
           <Progress
             percent={progressPercent}
+            // 抓取阶段拿不到总数，用不确定进度条，避免一直显示 0% 让人以为卡死
             status={job.status === "running" ? "active" : job.failed ? "exception" : "success"}
+            showInfo={job.total > 0}
           />
           <Space style={{ marginTop: 8 }}>
             <Tag color="green">成功 {job.success}</Tag>
@@ -182,8 +185,8 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
           </Space>
           {job.status === "running" && (
             <div style={{ marginTop: 8 }}>
-              <Button danger size="small" onClick={() => terminate()}>
-                终止任务
+              <Button danger size="small" loading={terminating} onClick={handleTerminate}>
+                结束进程
               </Button>
             </div>
           )}
@@ -201,6 +204,18 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
       <div style={{ marginTop: 8, fontSize: 12, color: "#8c8c8c" }}>更新时间：{lastUpdateTime || "-"}</div>
     </div>
   );
+
+  async function handleTerminate() {
+    setTerminating(true);
+    try {
+      await terminate();
+      message.success("已发出终止指令");
+    } catch (e: any) {
+      message.error(e?.response?.data?.message ?? "终止失败");
+    } finally {
+      setTerminating(false);
+    }
+  }
 
   const jobRunning = busy || job?.status === "running" || singleSyncing;
   // 只展示该账号被授权的操作。这只是体验层面的隐藏，
@@ -228,7 +243,34 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
     else if (key === "tapd-login") handleTapdLogin();
   };
 
-  // 一个同步操作都没授权（比如需求方）：整个入口都不展示，省得点开是空菜单
+  // 运行中/刚结束的任务指示器。抓取期间 total 还不知道（要翻完页才有），
+  // 这时只显示"进行中"，不显示 0/0 这种会让人以为卡住的数字。
+  // 只对有同步操作权限的人展示：没有「更新工单」按钮的角色也不该看到任务、更不该终止它
+  const jobIndicator = job ? (
+    <Popover
+      content={progressContent}
+      open={progressOpen}
+      onOpenChange={setProgressOpen}
+      trigger="click"
+      placement="bottomRight"
+    >
+      <Tag
+        color={job.status === "running" ? "processing" : job.failed ? "error" : "success"}
+        style={{ cursor: "pointer" }}
+      >
+        {jobLabel}{" "}
+        {job.status === "running"
+          ? job.total > 0
+            ? `${job.processed}/${job.total}`
+            : "进行中"
+          : job.status === "done"
+          ? "已完成"
+          : "已终止"}
+      </Tag>
+    </Popover>
+  ) : null;
+
+  // 一个同步操作都没授权（比如需求方）：入口和任务标签都不展示
   if (granted.length === 0) return null;
 
   return (
@@ -238,22 +280,7 @@ export default function UpdateTicketsButton({ onRefresh }: { onRefresh: () => vo
           更新工单 <DownOutlined />
         </Button>
       </Dropdown>
-      {job && (
-        <Popover
-          content={progressContent}
-          open={progressOpen}
-          onOpenChange={setProgressOpen}
-          trigger="click"
-          placement="bottomRight"
-        >
-          <Tag
-            color={job.status === "running" ? "processing" : job.failed ? "error" : "success"}
-            style={{ cursor: "pointer" }}
-          >
-            {jobLabel} {job.status === "running" ? `${job.processed}/${job.total}` : job.status === "done" ? "已完成" : "已终止"}
-          </Tag>
-        </Popover>
-      )}
+      {jobIndicator}
 
       <Modal
         title="获取TAPD信息"

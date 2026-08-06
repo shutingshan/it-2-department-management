@@ -6,6 +6,7 @@ import {
   AppstoreOutlined,
   BarChartOutlined,
   ClusterOutlined,
+  FilterOutlined,
   HistoryOutlined,
   HomeOutlined,
   LogoutOutlined,
@@ -61,6 +62,7 @@ export default function AppShell() {
       ? [
           ...BASE_MENU_ITEMS,
           { key: "/dept-config", icon: <ApartmentOutlined />, label: "部门配置" },
+          { key: "/scope-config", icon: <FilterOutlined />, label: "取数与显示范围" },
           { key: "/account-config", icon: <SettingOutlined />, label: "账号配置" },
           { key: "/change-logs", icon: <HistoryOutlined />, label: "变更日志" },
         ]

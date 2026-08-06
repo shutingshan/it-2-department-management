@@ -21,7 +21,8 @@ export const ALL_HANDLERS_KEY = "__all__";
 router.get("/home", (req, res) => {
   const yearParam = String(req.query.year ?? "2026");
   const year = yearParam === "all" ? null : Number(yearParam);
-  const tickets = store.tickets;
+  // 看板口径与工单中心一致：先按「分类显示范围」配置收敛
+  const tickets = store.visibleTickets;
 
   const completed = tickets.filter(
     (t) => (t.status === "已完成" || t.status === "已解决") && inYear(t.actualCompleteTime, year)
@@ -191,7 +192,8 @@ function expandToDevHourUnits(t: Ticket): DevHourUnit[] {
 }
 
 router.get("/dev-hours", (req, res) => {
-  const tickets = store.tickets;
+  // 看板口径与工单中心一致：先按「分类显示范围」配置收敛
+  const tickets = store.visibleTickets;
   const units = tickets.flatMap(expandToDevHourUnits);
 
   // 排序用的日期键：优先用迭代自己的起始日期（API模式才有真实值）；浏览器模式抓不到
@@ -328,7 +330,8 @@ router.get("/dev-hours", (req, res) => {
 
 // ---------- 部门统计 ----------
 router.get("/departments", (req, res) => {
-  const tickets = store.tickets;
+  // 看板口径与工单中心一致：先按「分类显示范围」配置收敛
+  const tickets = store.visibleTickets;
   const yearParam = String(req.query.year ?? "all");
   const year = yearParam === "all" ? null : Number(yearParam);
   const deptIdsParam = req.query.deptIds ? String(req.query.deptIds).split(",") : null;

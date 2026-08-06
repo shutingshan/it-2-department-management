@@ -1,0 +1,27 @@
+.scope-config-page {
+  background: var(--app-surface);
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+
+.scope-config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.scope-config-hint {
+  margin-bottom: 16px;
+}
+
+.scope-config-section {
+  margin-bottom: 24px;
+}
+
+.scope-config-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}

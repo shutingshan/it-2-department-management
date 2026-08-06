@@ -19,7 +19,7 @@ import {
   TapdLoginRequiredError,
 } from "../scrapers/tapdAuth";
 import { config } from "../config";
-import { applyFilters, parseQuery, TicketQuery } from "../filter";
+import { applyFilters, parseQuery, scopeForActor, TicketQuery } from "../filter";
 import { SyncPermission, Ticket } from "../types";
 
 // 权限不足跟"抓取失败"是两码事：前者该返回 403 让前端明确提示去找管理员开权限，
@@ -45,13 +45,18 @@ function fetchTapdFields(tapdUrl: string): Promise<TapdStoryFields> {
     : fetchTapdStoryFields(tapdUrl);
 }
 
-// 按工单中心当前筛选条件圈定候选工单；未传筛选条件时回退到"全部未完成/未关闭工单"；
-// 无论是否传筛选条件，均只对"未完成未关闭"的工单批量处理，不逐条处理已完成/已关闭的工单
-function resolveCandidates(filters: unknown): Ticket[] {
+// 圈定候选工单，口径必须跟操作人在工单中心列表里看到的完全一致，依次收敛：
+//   1. 分类显示范围配置（store.visibleTickets）
+//   2. 登录身份可见范围（IT受理人只看自己负责的、需求方只看跟自己相关的）
+//   3. 列表当前的筛选条件；未传筛选条件时表示"列表没筛"，用前两步的结果
+// 最后无论有没有筛选，都只处理"未完成未关闭"的工单，不逐条处理已完成/已关闭的
+function resolveCandidates(filters: unknown, actor?: string): Ticket[] {
+  const role = store.accounts.find((a) => a.name === actor)?.role;
+  const visible = scopeForActor(store.visibleTickets, actor, role);
   const hasFilters = filters && typeof filters === "object" && Object.keys(filters as object).length > 0;
   const base = hasFilters
-    ? applyFilters(store.tickets, parseQuery(filters as Record<string, unknown>) as TicketQuery)
-    : store.tickets;
+    ? applyFilters(visible, parseQuery(filters as Record<string, unknown>) as TicketQuery)
+    : visible;
   return base.filter((t) => t.stage !== "已完成" && t.stage !== "关闭");
 }
 
@@ -92,6 +97,22 @@ function verifyScrapedRowsAgainstCompletedTicket(rows: ScrapedRow[]) {
   if (!scrapedCodes.has(verificationTicket.code)) {
     throw new Error(`当前工单列表与要求列表不符。工单验证编号：${verificationTicket.code}`);
   }
+}
+
+// 按「受理人范围」配置收敛本次要落库的行：配置为空表示不限制（保持升级前的行为）。
+// 受理人是多人字段（当曲云里用顿号/分号等拼接），命中其中任意一人即算在范围内
+export function applyHandlerScope(rows: ScrapedRow[]): ScrapedRow[] {
+  const allowed = store.fetchScopeHandlers.map((i) => i.value);
+  if (!allowed.length) return rows;
+  return rows.filter((row) => {
+    const raw = row["受理人"]?.trim();
+    if (!raw) return false;
+    return raw
+      .split(/[、,，;；\/]/)
+      .map((v) => v.trim())
+      .filter(Boolean)
+      .some((name) => allowed.includes(name));
+  });
 }
 
 // 逐行落库：新增/覆盖更新工单中心数据，单行失败不影响其余行；抽成纯函数便于独立单测
@@ -140,6 +161,12 @@ export function applyScrapedRows(rows: ScrapedRow[], isFull: boolean) {
 // 获取新工单没有进度轮询的 job 机制，容易在等待时间变长后被误以为"没反应"而重复点击，
 // 导致两次抓取同时跑、共用同一份浏览器登录态文件互相干扰；这里用一个模块级标记防止并发执行
 let fetchNewRunning = false;
+// 「终止任务」按下后置为 true，抓取过程在翻页间隙检查它，尽快停下来
+let fetchNewCancelled = false;
+
+export function cancelFetchNew() {
+  if (fetchNewRunning) fetchNewCancelled = true;
+}
 
 // 获取新工单：供路由与定时任务共用；失败时已在此处记录变更日志并向上抛出。
 // 完成后会把结果写入 store.currentJob（type: fetch_new），供前端沿用既有的悬浮进度弹窗展示
@@ -148,13 +175,29 @@ export async function runFetchNew(actor: string, mode?: "incremental" | "full") 
     throw new Error("已有获取新工单任务在执行中，请等待其完成后再试");
   }
   fetchNewRunning = true;
+  fetchNewCancelled = false;
   const isFull = mode === "full";
   const startedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
+  // 抓取期间就把任务挂出去，导航栏才能显示"进行中"并提供终止入口。
+  // 抓取阶段拿不到总数（要翻完页才知道），total 先给 0，前端按"进行中"展示
+  store.currentJob = {
+    id: `job-${Date.now()}`,
+    type: "fetch_new",
+    status: "running",
+    total: 0,
+    processed: 0,
+    success: 0,
+    failed: 0,
+    startedAt,
+    finishedAt: null,
+    failReasons: [],
+  };
   try {
     // 真实抓取当曲云工单列表（需要 backend/.env 配置好账号密码，见 .env.example）；
     // 增量模式：按"编号"跟工单中心现有数据比对，只新增工单中心里还没有的；
     // 全量模式（用于数据初始化）：已存在的工单也会用当曲云最新数据覆盖已同步字段
-    const result = await scrapeDangquyunTicketList();
+    const result = await scrapeDangquyunTicketList({ shouldCancel: () => fetchNewCancelled });
+    if (fetchNewCancelled) throw new Error("任务被手动终止");
     if (result.strategy === "none") {
       // 地址对了，但三种表格结构都没识别出来（页面改版/选择器失效等）：不能当成"0条新工单"，
       // 否则会跟"这次确实没有新工单"混为一谈，误导使用者以为抓取正常
@@ -162,8 +205,11 @@ export async function runFetchNew(actor: string, mode?: "incremental" | "full") 
         "未能识别当曲云工单列表页面结构，本次抓取判定无效（截图/HTML已保存到 backend/.auth/debug/）"
       );
     }
+    // 核验必须在按受理人过滤之前做：用于核验的那条已完成工单不一定属于配置里的受理人，
+    // 先过滤会把它滤掉，导致核验必然失败
     verifyScrapedRowsAgainstCompletedTicket(result.rows);
-    const { addedCount, updatedCount, failedCount, failReasons } = applyScrapedRows(result.rows, isFull);
+    const scopedRows = applyHandlerScope(result.rows);
+    const { addedCount, updatedCount, failedCount, failReasons } = applyScrapedRows(scopedRows, isFull);
 
     const finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
     store.currentJob = {
@@ -185,24 +231,33 @@ export async function runFetchNew(actor: string, mode?: "incremental" | "full") 
       actor,
       success: failedCount === 0,
       failReason: failedCount ? failReasons.join("; ") : null,
-      detail: `本次抓取 ${result.pageCount} 页共 ${result.rows.length} 条（策略：${result.strategy}），新增 ${addedCount} 条${
+      detail: `本次抓取 ${result.pageCount} 页共 ${result.rows.length} 条（策略：${result.strategy}）${
+        result.rows.length !== scopedRows.length ? `，按受理人范围保留 ${scopedRows.length} 条` : ""
+      }，新增 ${addedCount} 条${
         isFull ? `，覆盖更新 ${updatedCount} 条` : ""
       }，更新异常 ${failedCount} 条`,
     });
     return { addedCount, updatedCount, failedCount, failReasons };
   } catch (e) {
     const message = (e as Error).message ?? "未知错误";
+    // 不论失败还是被终止，都要把挂出去的任务收尾，否则导航栏会一直显示"进行中"
+    if (store.currentJob?.status === "running") {
+      store.currentJob.status = fetchNewCancelled ? "terminated" : "failed";
+      store.currentJob.finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
+      store.currentJob.failReasons = [message];
+    }
     store.addLog({
       type: "获取新工单",
       time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
       actor,
       success: false,
       failReason: message,
-      detail: "获取新工单失败",
+      detail: fetchNewCancelled ? "获取新工单被手动终止" : "获取新工单失败",
     });
     throw e;
   } finally {
     fetchNewRunning = false;
+    fetchNewCancelled = false;
   }
 }
 
@@ -249,7 +304,7 @@ function finishJob(job: SyncJob) {
 // 未在当曲云列表里匹配到编号的候选工单、或整份列表都抓取失败，记为失败并反填 dangquyunErrorNote，
 // 不影响其余候选工单
 export function startUpdateTicketsJob(actor: string, filters?: unknown): { job: SyncJob; done: Promise<SyncJob> } {
-  const candidates = resolveCandidates(filters);
+  const candidates = resolveCandidates(filters, actor);
   const job: SyncJob = {
     id: `job-${Date.now()}`,
     type: "update_tickets",
@@ -371,13 +426,27 @@ router.post("/update-tickets", (req, res) => {
 });
 
 router.post("/terminate", (req, res) => {
+  // 跟前端"只有能发起同步的人才看得到任务标签"保持一致：一个同步权限都没有的账号
+  // 不能终止别人发起的任务。这里不限定具体是哪一项权限，有任意一项即可
+  const actor = (req.body as { actor?: string }).actor;
+  const account = store.accounts.find((a) => a.name === actor);
+  if (!account || (account.role !== "admin" && !(account.syncPermissions ?? []).length)) {
+    return res.status(403).json({ message: "没有终止同步任务的权限，请联系管理员在账号配置中勾选" });
+  }
+  // 获取新工单是一段长时间的浏览器抓取，不走 setInterval，需要单独打断
+  cancelFetchNew();
   if (store.currentJob && store.currentJob.status === "running") {
     store.currentJob.status = "terminated";
     store.currentJob.finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
     store.addLog({
-      type: store.currentJob.type === "sync_tapd" ? "同步TAPD" : "更新工单",
+      type:
+        store.currentJob.type === "sync_tapd"
+          ? "同步TAPD"
+          : store.currentJob.type === "fetch_new"
+          ? "获取新工单"
+          : "更新工单",
       time: store.currentJob.finishedAt,
-      actor: (req.body as { actor?: string }).actor ?? "未知",
+      actor: actor ?? "未知",
       success: false,
       failReason: "任务被手动终止",
       detail: `已处理 ${store.currentJob.processed}/${store.currentJob.total}`,
@@ -644,7 +713,7 @@ async function launchSharedTapdSession(): Promise<{ browser: Browser; page: Page
 // 还没跑完时就再取一批新的候选工单开始处理，导致实际上是大量工单同时在跑，
 // 因此改成真正的顺序循环，不再用定时器驱动
 export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; done: Promise<SyncJob> } {
-  const candidates = resolveCandidates(filters).filter((t) => t.tapdUrl);
+  const candidates = resolveCandidates(filters, actor).filter((t) => t.tapdUrl);
   const job: SyncJob = {
     id: `job-${Date.now()}`,
     type: "sync_tapd",
@@ -667,25 +736,29 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
 
   (async () => {
     let session: { browser: Browser; page: Page } | null = null;
+
+    const abortJob = (reason: string, detail: string) => {
+      job.status = "failed";
+      job.finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
+      job.failReasons.push(reason);
+      store.addLog({
+        type: "同步TAPD",
+        time: job.finishedAt,
+        actor,
+        success: false,
+        failReason: reason,
+        detail,
+      });
+      finishJob(job);
+    };
+
     if (config.tapd.fetchMode === "browser" && candidates.length > 0) {
       try {
         session = await launchSharedTapdSession();
       } catch (e) {
         // 登录态无效/已过期：整单终止，不逐条去撞同一个错误——否则每条工单都会失败一次，
         // 失败原因刷满一屏，还白白开关一堆浏览器窗口
-        const reason = (e as Error).message ?? "TAPD 尚未登录";
-        job.status = "failed";
-        job.finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
-        job.failReasons.push(reason);
-        store.addLog({
-          type: "同步TAPD",
-          time: job.finishedAt,
-          actor,
-          success: false,
-          failReason: reason,
-          detail: "同步 TAPD 终止：需要重新扫码登录",
-        });
-        finishJob(job);
+        abortJob((e as Error).message ?? "TAPD 尚未登录", "同步 TAPD 终止：需要重新扫码登录");
         return;
       }
     }
@@ -702,12 +775,32 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
           job.processed += 1;
           continue;
         }
+        // 浏览器模式下必须始终复用同一个会话。会话不可用时先重建一次，重建再失败就整单终止——
+        // 绝不能退化成"每条工单单独开一个浏览器"：那会在几百毫秒内连开几十个 Chrome，
+        // macOS 上会把 crashpad 的 Mach 服务注册撑爆（bootstrap_check_in 失败 -> SIGABRT），
+        // 表现为每条工单都报 browserType.launch 失败，看上去像是工单本身有问题
+        if (config.tapd.fetchMode === "browser" && (!session || session.page.isClosed())) {
+          try {
+            if (session) await session.browser.close().catch(() => {});
+            session = await launchSharedTapdSession();
+          } catch (e) {
+            const reason = (e as Error).message ?? "未知错误";
+            abortJob(
+              `TAPD 浏览器会话无法建立，已终止本次同步（已处理 ${job.processed}/${job.total}）：${reason}`,
+              "同步 TAPD 终止：浏览器会话无法建立"
+            );
+            await session?.browser.close().catch(() => {});
+            return;
+          }
+        }
+
         ticketsSyncingTapd.add(ticket.id);
         try {
-          const fields =
-            session && !session.page.isClosed()
-              ? await scrapeTapdStoryFields(session.page, ticket.tapdUrl!)
-              : await fetchTapdFields(ticket.tapdUrl!);
+          // 浏览器模式下 session 必定可用（上面的守卫保证，不可用时已整单终止）；
+          // session 为 null 只可能是开放平台 API 模式，那条路不涉及浏览器
+          const fields = session
+            ? await scrapeTapdStoryFields(session.page, ticket.tapdUrl!)
+            : await fetchTapdFields(ticket.tapdUrl!);
           applyTapdFields(ticket, fields);
           ticket.tapdErrorNote = null; // 本次同步成功，清除历史异常标记
           job.success += 1;
@@ -717,12 +810,8 @@ export function startTapdJob(actor: string, filters?: unknown): { job: SyncJob; 
           job.failReasons.push(`${ticket.code}: ${reason}`);
           // 按条更新：更新失败记录到 TAPD 异常备注字段，保留时间与原因
           ticket.tapdErrorNote = { time: dayjs().format("YYYY-MM-DD HH:mm:ss"), message: reason };
-          // 复用的页面可能因为这次失败而报废（比如窗口被意外关闭），检测到就丢弃重开一个，
-          // 避免这条工单的问题连累后面所有工单都跟着失败
-          if (session && session.page.isClosed()) {
-            await session.browser.close().catch(() => {});
-            session = await launchSharedTapdSession();
-          }
+          // 复用的页面可能因为这次失败而报废（比如窗口被意外关闭）。这里不重建，
+          // 交给下一轮循环开头统一处理：那里重建失败会整单终止，不会无限重试
         } finally {
           ticketsSyncingTapd.delete(ticket.id);
         }

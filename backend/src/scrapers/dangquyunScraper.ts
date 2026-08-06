@@ -238,7 +238,11 @@ function normalizeUrl(url: string): string {
   return url.split("?")[0].replace(/\/+$/, "");
 }
 
-export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
+// shouldCancel：翻页前回调一次，返回 true 表示任务已被手动终止。
+// 终止时直接抛错而不是返回半份数据——半份数据落库会被当成"当曲云上只有这些工单"
+export async function scrapeDangquyunTicketList(
+  options: { shouldCancel?: () => boolean } = {}
+): Promise<ScrapeResult> {
   const browser = await launchBrowser();
   try {
     const context = await getAuthenticatedContext(browser);
@@ -294,6 +298,7 @@ export async function scrapeDangquyunTicketList(): Promise<ScrapeResult> {
     let pageCount = 1;
 
     while (pageCount < MAX_PAGES) {
+      if (options.shouldCancel?.()) throw new Error("任务被手动终止");
       const moved = await goToNextPage(targets);
       if (!moved) break;
 
