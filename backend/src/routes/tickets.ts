@@ -27,9 +27,10 @@ router.get("/card-stats", (req, res) => {
 
 // 真实工单数据里出现过的 IT 受理人（去重排序），供"切换人员"等入口使用。
 // 不用人员目录（store.users）是因为那份是预置的部门人员名单，跟真实工单里实际出现的
-// 受理人不一定对得上：目录里有的人可能一条工单都没有，工单里的人也可能不在目录里
+// 受理人不一定对得上：目录里有的人可能一条工单都没有，工单里的人也可能不在目录里。
+// 同样走分类显示范围：否则下拉里会出现"选了之后列表一条都没有"的人
 router.get("/it-handlers", (_req, res) => {
-  const names = dedupe(store.tickets.map((t) => t.itHandler)).sort();
+  const names = dedupe(store.visibleTickets.map((t) => t.itHandler)).sort();
   const data = names.map((name) => {
     const matched = store.users.find((u) => u.name === name);
     return { id: matched?.id ?? name, name, avatarColor: matched?.avatarColor ?? "#999999" };
@@ -37,9 +38,10 @@ router.get("/it-handlers", (_req, res) => {
   res.json({ data });
 });
 
-// 工单编号候选（仅关联了TAPD地址的），供"获取TAPD信息"弹窗里按单条工单编号选择使用
+// 工单编号候选（仅关联了TAPD地址的），供"获取TAPD信息"弹窗里按单条工单编号选择使用。
+// 同样走分类显示范围：否则能选到工单中心里根本看不到的工单去同步
 router.get("/codes", (_req, res) => {
-  const codes = dedupe(store.tickets.filter((t) => t.tapdUrl).map((t) => t.code)).sort();
+  const codes = dedupe(store.visibleTickets.filter((t) => t.tapdUrl).map((t) => t.code)).sort();
   res.json({ data: codes });
 });
 
