@@ -176,5 +176,47 @@ export function backupStoreFile(): string | null {
   }
 }
 
+// ---- 每日自动备份 ----
+// 命名前缀跟上面那个"删除前备份"刻意分开：轮转只清理每日备份，
+// store-backup-* 是不可逆删除前的救命副本，一份都不能自动删
+const DAILY_BACKUP_PREFIX = "store-daily-";
+// 保留份数，默认 7 天。设成 1 以下没有意义，兜底拉回 1
+const DAILY_BACKUP_KEEP = Math.max(1, Number(process.env.STORE_BACKUP_KEEP ?? 7));
+
+/**
+ * 生成当天的数据备份（已有则跳过），并按保留份数清理旧的。
+ * 返回新生成的文件名；跳过或失败返回 null。
+ */
+export function runDailyBackup(dateStr: string): string | null {
+  try {
+    if (!fs.existsSync(DATA_FILE)) return null;
+    // 工单为空时绝不备份：load() 出错会以空数据启动（见 load 的 catch），
+    // 这时候备份等于把一份空文件存进来，还会把之前的好备份挤出保留窗口
+    if (!store.tickets.length) return null;
+
+    const name = `${DAILY_BACKUP_PREFIX}${dateStr}.json`;
+    const target = path.join(DATA_DIR, name);
+    if (fs.existsSync(target)) return null; // 今天已经备份过了
+
+    fs.copyFileSync(DATA_FILE, target);
+    pruneDailyBackups();
+    return name;
+  } catch (e) {
+    console.error("[store] 每日备份失败：", (e as Error).message);
+    return null;
+  }
+}
+
+// 文件名里的日期是 YYYY-MM-DD 定长格式，字典序即时间序，直接排序取最旧的删
+function pruneDailyBackups() {
+  const files = fs
+    .readdirSync(DATA_DIR)
+    .filter((f) => f.startsWith(DAILY_BACKUP_PREFIX) && f.endsWith(".json"))
+    .sort();
+  for (const f of files.slice(0, Math.max(0, files.length - DAILY_BACKUP_KEEP))) {
+    fs.unlinkSync(path.join(DATA_DIR, f));
+  }
+}
+
 export const store = new Store();
 export type { SyncJob };

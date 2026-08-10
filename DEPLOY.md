@@ -103,6 +103,25 @@ scp backend/data/store.json root@<服务器IP>:/opt/it-2-department-management/b
 ```
 
 不迁移的话系统是空的，需要在页面上用「更新工单 → 全量获取」重新抓一遍。
+注意重抓只能拿回当曲云上有的字段，页面上手工维护的备注、紧急标记等抓不回来。
+
+### 数据备份与恢复
+
+后端每天自动把 `store.json` 存一份到 `backend/data/store-daily-YYYY-MM-DD.json`，
+启动时也会补一次。默认保留 7 天，改 `backend/.env` 里的 `STORE_BACKUP_KEEP` 可调整。
+工单为空时不会备份，避免数据读取异常时用空文件把好备份挤掉。
+
+恢复某一天的数据：
+
+```bash
+pm2 stop it2-ticket
+cd /opt/it-2-department-management/backend/data
+cp store-daily-2026-08-06.json store.json
+pm2 start it2-ticket
+```
+
+> `store-backup-*.json` 是另一种备份：执行「批量删除工单」这类不可逆操作前自动生成，
+> 永久保留、不参与上面的轮转，误删后同样可以按上面的步骤改名回滚。
 
 ---
 
