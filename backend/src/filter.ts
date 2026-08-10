@@ -135,6 +135,15 @@ export function applyDisplayScope(tickets: Ticket[], categories: string[]): Tick
   return tickets.filter((t) => categories.includes(t.category));
 }
 
+// 归属应用排除名单：命中的工单不显示。
+// 注意语义跟上面的分类范围是反的——分类范围是"只留配置里的"，这里是"去掉配置里的"。
+// 之所以用排除而不是保留：归属应用会随业务不断新增，用保留的话每上一个新应用
+// 都得记得来这里补一条，漏了就整个应用的工单都看不见
+export function applyOwningAppExclusion(tickets: Ticket[], excludedApps: string[]): Ticket[] {
+  if (!excludedApps.length) return tickets;
+  return tickets.filter((t) => !excludedApps.includes(t.owningApp));
+}
+
 export function scopeForActor(tickets: Ticket[], actor?: string, actorRole?: string): Ticket[] {
   if (!actor) return tickets;
   if (actorRole === "requester") {
