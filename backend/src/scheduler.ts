@@ -1,4 +1,4 @@
-import { store } from "./store";
+import { runDailyBackup, store } from "./store";
 import { runFetchNew, startTapdJob, startUpdateTicketsJob } from "./routes/sync";
 
 // 定时同步的操作人标识：用于变更日志中区分"人工点击"与"定时任务触发"
@@ -34,9 +34,21 @@ export async function runScheduledSyncChain() {
   }
 }
 
+// 每天给 store.json 存一份副本。全部数据就这一个 JSON 文件，误删或写坏就没了，
+// 而页面上维护的备注、紧急标记这些字段当曲云里没有，重抓也找不回来。
+// 顺带挂在下面那条 60 秒 tick 上，不额外开定时器；当天已备份过会自行跳过
+function backupDaily(dateStr: string) {
+  const name = runDailyBackup(dateStr);
+  if (name) console.log(`[store] 已生成每日备份 ${name}`);
+}
+
 export function startScheduler() {
+  // 启动时先补一次：进程可能整天都不运行，等不到 tick 里的跨天判断
+  backupDaily(currentBeijingTime().dateStr);
+
   setInterval(() => {
     const { dateStr, minutes } = currentBeijingTime();
+    backupDaily(dateStr);
     // "今天是否已经跑过"这个标记落在 store 里、随 store 一起落盘，不能用只存在内存里的变量——
     // 否则每次重启后端都会清零，一旦重启时北京时间已过18:30，就会被误判成"今天还没跑过"，
     // 60秒内又把当曲云/更新工单/TAPD这一整条链路重新触发一次
