@@ -8,27 +8,30 @@ const router = Router();
 
 // 三类范围各一张表，路径上用 kind 区分，避免写三套一模一样的增删改查。
 // 注意 excludedApps 是排除语义（配了就不显示），另外两类是保留语义（配了就只显示这些）
-type ScopeKind = "handlers" | "categories" | "excludedApps";
+type ScopeKind = "handlers" | "categories" | "excludedApps" | "verifyCodes";
 const KIND_LABELS: Record<ScopeKind, string> = {
   handlers: "受理人",
   categories: "工单分类",
   excludedApps: "归属应用",
+  verifyCodes: "校验工单编号",
 };
 
 function isKind(v: string): v is ScopeKind {
-  return v === "handlers" || v === "categories" || v === "excludedApps";
+  return v === "handlers" || v === "categories" || v === "excludedApps" || v === "verifyCodes";
 }
 
 function listOf(kind: ScopeKind): ScopeConfigItem[] {
   if (kind === "handlers") return store.fetchScopeHandlers;
   if (kind === "categories") return store.displayCategories;
-  return store.excludedOwningApps;
+  if (kind === "excludedApps") return store.excludedOwningApps;
+  return store.verifyTicketCodes;
 }
 
 function setList(kind: ScopeKind, list: ScopeConfigItem[]) {
   if (kind === "handlers") store.fetchScopeHandlers = list;
   else if (kind === "categories") store.displayCategories = list;
-  else store.excludedOwningApps = list;
+  else if (kind === "excludedApps") store.excludedOwningApps = list;
+  else store.verifyTicketCodes = list;
 }
 
 /** 当前配置。为空时前端要提示「未配置＝不限制 / 不排除」 */
@@ -38,6 +41,7 @@ router.get("/", (_req, res) => {
       handlers: store.fetchScopeHandlers,
       categories: store.displayCategories,
       excludedApps: store.excludedOwningApps,
+      verifyCodes: store.verifyTicketCodes,
     },
   });
 });
@@ -54,6 +58,11 @@ router.get("/options", (_req, res) => {
       handlers: dedupe(store.tickets.map((t) => t.itHandler).filter((v) => v && v.trim())).sort(),
       categories: dedupe(store.tickets.map((t) => t.category).filter((v) => v && v.trim())).sort(),
       excludedApps: dedupe(store.tickets.map((t) => t.owningApp).filter((v) => v && v.trim())).sort(),
+      // 校验工单候选只给显示范围内、且已完成的：核验用的工单必须是使用者在工单中心
+      // 能看到的，否则校验失败时连那条工单都查不到；已完成的工单不会再变动，最稳定
+      verifyCodes: dedupe(
+        store.visibleTickets.filter((t) => t.stage === "已完成").map((t) => t.code).filter((v) => v && v.trim())
+      ).sort(),
     },
   });
 });

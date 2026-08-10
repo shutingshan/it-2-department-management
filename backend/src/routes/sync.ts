@@ -82,18 +82,36 @@ router.get("/status", (req, res) => {
 // （比如筛选条件被重置、翻页逻辑抓到了别的视图）。挑一条工单中心这边已经是"已完成"状态的
 // 工单，检查这次抓到的当曲云列表里是否还找得到这个编号——连一条已完成的工单都对不上，
 // 说明这次数据来源可疑，宁可这次不抓，也不能拿一份可疑数据去新增/覆盖工单。
-// 挑"已完成"里最近完成的一条做验证：当曲云列表本身可能有时间范围之类的默认筛选，
-// 太久以前完成的工单不一定还留在列表里，用最近完成的能尽量避免"验证工单本来就没在列表里"
-// 这种误判；工单中心里还没有任何"已完成"的工单时没法做这个校验，直接跳过
-function verifyScrapedRowsAgainstCompletedTicket(rows: ScrapedRow[]) {
-  const completed = store.tickets.filter((t) => t.stage === "已完成");
+// 用哪条工单来验证，按以下顺序决定：
+//   1. 「校验工单编号」配置：由管理员指定，配几条就要全部命中——自动挑选毕竟是猜的，
+//      指定一条确定长期留在当曲云列表里的工单最可靠
+//   2. 未配置时回落到自动挑选：显示范围内"已完成"里最近完成的一条。当曲云列表本身
+//      可能有时间范围之类的默认筛选，太久以前完成的工单不一定还留在列表里，用最近
+//      完成的能尽量避免"验证工单本来就没在列表里"这种误判
+// 自动挑选走 visibleTickets 而不是全量：分类范围/归属应用排除之外的工单在工单中心
+// 根本看不到，拿它做验证，一旦失败使用者在页面上都找不到那条工单，无从判断真假。
+// 一条可用的验证工单都没有时（没配置且显示范围内没有已完成工单）跳过校验
+export function verifyScrapedRowsAgainstCompletedTicket(rows: ScrapedRow[]) {
+  const scrapedCodes = new Set(rows.map((r) => r["编号"]?.trim()).filter(Boolean));
+
+  const configuredCodes = store.verifyTicketCodes.map((i) => i.value);
+  if (configuredCodes.length) {
+    const missing = configuredCodes.filter((code) => !scrapedCodes.has(code));
+    if (missing.length) {
+      throw new Error(
+        `当前工单列表与要求列表不符。配置的校验工单编号未出现在抓取结果里：${missing.join("、")}`
+      );
+    }
+    return;
+  }
+
+  const completed = store.visibleTickets.filter((t) => t.stage === "已完成");
   if (completed.length === 0) return;
 
   const verificationTicket = [...completed].sort((a, b) =>
     (b.actualCompleteTime ?? b.submittedAt).localeCompare(a.actualCompleteTime ?? a.submittedAt)
   )[0];
 
-  const scrapedCodes = new Set(rows.map((r) => r["编号"]?.trim()).filter(Boolean));
   if (!scrapedCodes.has(verificationTicket.code)) {
     throw new Error(`当前工单列表与要求列表不符。工单验证编号：${verificationTicket.code}`);
   }
