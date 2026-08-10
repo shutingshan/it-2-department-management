@@ -3,7 +3,7 @@ import path from "path";
 import { v4 as uuid } from "uuid";
 import { DEPARTMENTS, SEED_ADMIN, generateAccounts } from "./seed";
 import { buildUserDirectory } from "./userDirectory";
-import { applyDisplayScope } from "./filter";
+import { applyDisplayScope, applyOwningAppExclusion } from "./filter";
 import { Account, ChangeLogEntry, Department, ScopeConfigItem, InSiteMessage, LogEntry, Ticket, User } from "./types";
 
 // 工单/处理记录/站内信/同步日志是真实业务数据（不是每次启动都重新生成的模拟数据），
@@ -24,9 +24,11 @@ interface PersistedState {
   // 一旦把它也落盘，以后更新 seed.ts 里的人员名单反而会被旧的落盘数据盖住、不生效
   departments: Department[];
   accounts: Account[];
-  // 范围配置：受理人（取数范围）/ 分类（工单中心显示范围），页面上可增删改，必须落盘
+  // 范围配置：受理人（取数范围）/ 分类（工单中心显示范围）/ 归属应用（排除名单），
+  // 页面上可增删改，必须落盘
   fetchScopeHandlers: ScopeConfigItem[];
   displayCategories: ScopeConfigItem[];
+  excludedOwningApps: ScopeConfigItem[];
 }
 
 interface SyncJob {
@@ -64,6 +66,7 @@ class Store {
   lastScheduledSyncDate: string | null = null;
   fetchScopeHandlers: ScopeConfigItem[] = [];
   displayCategories: ScopeConfigItem[] = [];
+  excludedOwningApps: ScopeConfigItem[] = [];
 
   constructor() {
     this.load();
@@ -89,9 +92,10 @@ class Store {
       // 不能又被 seed 数据填回来
       this.departments = parsed.departments ?? DEPARTMENTS;
       this.accounts = parsed.accounts ?? generateAccounts();
-      // 老的 store.json 里没有这两个键，回退到空数组＝不限制，保持升级前的行为
+      // 老的 store.json 里没有这几个键，回退到空数组＝不限制/不排除，保持升级前的行为
       this.fetchScopeHandlers = parsed.fetchScopeHandlers ?? [];
       this.displayCategories = parsed.displayCategories ?? [];
+      this.excludedOwningApps = parsed.excludedOwningApps ?? [];
 
       // 兜底：管理员账号是锁定的、页面上删不掉，但万一落盘数据被手工改坏导致一个管理员都没有，
       // 就会彻底登不进系统、也没有任何入口能把它加回来。这里补一个回去，避免被锁在门外
@@ -121,6 +125,7 @@ class Store {
         accounts: this.accounts,
         fetchScopeHandlers: this.fetchScopeHandlers,
         displayCategories: this.displayCategories,
+        excludedOwningApps: this.excludedOwningApps,
       };
       const tmpFile = `${DATA_FILE}.tmp`;
       fs.writeFileSync(tmpFile, JSON.stringify(state));
@@ -131,12 +136,15 @@ class Store {
   }
 
   /**
-   * 工单中心与各看板统一的可见数据源：按「分类显示范围」配置收敛后的工单。
+   * 工单中心与各看板统一的可见数据源，两条范围配置依次收敛（两者是"与"的关系）：
+   *   1. 分类显示范围：只保留配置里的分类
+   *   2. 归属应用排除名单：去掉配置里的归属应用
    * 列表、统计卡片、导出、首页/开发工时/部门统计都必须用它，
-   * 否则会出现"看板数量跟列表对不上"。配置为空时返回全部。
+   * 否则会出现"看板数量跟列表对不上"。两项都为空时返回全部。
    */
   get visibleTickets(): Ticket[] {
-    return applyDisplayScope(this.tickets, this.displayCategories.map((i) => i.value));
+    const byCategory = applyDisplayScope(this.tickets, this.displayCategories.map((i) => i.value));
+    return applyOwningAppExclusion(byCategory, this.excludedOwningApps.map((i) => i.value));
   }
 
   getTicket(id: string) {

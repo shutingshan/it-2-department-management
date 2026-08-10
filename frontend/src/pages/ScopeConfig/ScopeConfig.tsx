@@ -15,6 +15,11 @@ interface SectionMeta {
   addLabel: string;
   valueLabel: string;
   emptyHint: string;
+  /**
+   * 未配置时的提示色。保留语义（只显示配置里的）未配置意味着"没生效"，用黄色提醒；
+   * 排除语义（不显示配置里的）未配置就是正常默认状态，用黄色反而像出了问题
+   */
+  emptyTone?: "warning" | "info";
 }
 
 const SECTIONS: SectionMeta[] = [
@@ -36,6 +41,16 @@ const SECTIONS: SectionMeta[] = [
     valueLabel: "工单分类",
     emptyHint: "当前未配置，表示不按分类限制，工单中心显示全部分类。",
   },
+  {
+    kind: "excludedApps",
+    title: "工单中心排除的归属应用",
+    description:
+      "与上面两项相反，这里配的是「不看什么」：归属应用命中下表的工单不在工单中心显示，统计卡片与导出同样不计入。与分类范围同时配置时取交集——先按分类范围保留，再从中去掉这些归属应用。",
+    addLabel: "新增归属应用",
+    valueLabel: "归属应用",
+    emptyHint: "当前未配置，表示不排除任何归属应用。",
+    emptyTone: "info",
+  },
 ];
 
 export default function ScopeConfig() {
@@ -43,10 +58,12 @@ export default function ScopeConfig() {
   const [data, setData] = useState<Record<ScopeKind, ScopeConfigItem[]>>({
     handlers: [],
     categories: [],
+    excludedApps: [],
   });
   const [options, setOptions] = useState<Record<ScopeKind, string[]>>({
     handlers: [],
     categories: [],
+    excludedApps: [],
   });
   const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState<{ section: SectionMeta; editing: ScopeConfigItem | null } | null>(null);
@@ -137,7 +154,7 @@ export default function ScopeConfig() {
             </div>
             <Alert
               className="scope-config-hint"
-              type={list.length ? "info" : "warning"}
+              type={list.length ? "info" : section.emptyTone ?? "warning"}
               showIcon
               message={list.length ? section.description : `${section.emptyHint} ${section.description}`}
             />
