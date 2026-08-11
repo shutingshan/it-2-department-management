@@ -1,33 +1,19 @@
 import dayjs from "dayjs";
 import { v4 as uuid } from "uuid";
 import { resolveStage } from "../mapping";
-import { Attachment, Ticket, TicketStatus } from "../types";
+import { Attachment, Ticket, TicketStatus, TICKET_STATUSES } from "../types";
 import { ScrapedRow } from "./dangquyunScraper";
-
-const KNOWN_STATUSES: TicketStatus[] = [
-  "待处理",
-  "梳理中",
-  "已梳理",
-  "规划中",
-  "开发完成",
-  "实现中",
-  "转测试",
-  "测试中",
-  "待验收",
-  "已验收",
-  "已解决",
-  "已完成",
-  "关闭",
-];
 
 function emptyToNull(v: string | undefined): string | null {
   const t = (v ?? "").trim();
   return t === "" || t === "-" ? null : t;
 }
 
+// 认不出来的状态值一律落成"待处理"。新状态值要生效，必须先加进 TICKET_STATUSES，
+// 否则会被静默吞掉——当曲云新增"新制"时就是这么丢的
 function parseStatus(v: string | undefined): TicketStatus {
   const t = (v ?? "").trim() as TicketStatus;
-  return KNOWN_STATUSES.includes(t) ? t : "待处理";
+  return (TICKET_STATUSES as readonly string[]).includes(t) ? t : "待处理";
 }
 
 function parseAttachments(v: string | undefined): Attachment[] {

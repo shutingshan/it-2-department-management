@@ -52,6 +52,16 @@ const SECTIONS: SectionMeta[] = [
     emptyTone: "info",
   },
   {
+    kind: "excludedStatuses",
+    title: "工单中心排除的状态",
+    description:
+      "状态命中下表的工单不在工单中心显示，统计卡片与导出同样不计入。常用于把「关闭」「已完成」这类不需要日常盯的状态收起来。与其余范围配置同时生效时取交集。",
+    addLabel: "新增状态",
+    valueLabel: "状态",
+    emptyHint: "当前未配置，表示不排除任何状态。",
+    emptyTone: "info",
+  },
+  {
     kind: "verifyCodes",
     title: "抓取结果校验工单编号",
     description:
@@ -69,12 +79,14 @@ export default function ScopeConfig() {
     handlers: [],
     categories: [],
     excludedApps: [],
+    excludedStatuses: [],
     verifyCodes: [],
   });
   const [options, setOptions] = useState<Record<ScopeKind, string[]>>({
     handlers: [],
     categories: [],
     excludedApps: [],
+    excludedStatuses: [],
     verifyCodes: [],
   });
   const [loading, setLoading] = useState(false);

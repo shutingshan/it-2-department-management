@@ -32,9 +32,14 @@ export interface ScopeConfigItem {
 }
 
 // handlers=获取工单受理人范围；categories=工单中心显示分类；
-// excludedApps=工单中心排除的归属应用（排除语义，跟前两者相反）；
+// excludedApps / excludedStatuses=工单中心排除的归属应用 / 状态（排除语义，跟前两者相反）；
 // verifyCodes=抓取结果核验用的工单编号
-export type ScopeKind = "handlers" | "categories" | "excludedApps" | "verifyCodes";
+export type ScopeKind =
+  | "handlers"
+  | "categories"
+  | "excludedApps"
+  | "excludedStatuses"
+  | "verifyCodes";
 
 export interface Account {
   id: string;
@@ -53,20 +58,25 @@ export interface Department {
   children?: Department[];
 }
 
-export type TicketStatus =
-  | "待处理"
-  | "梳理中"
-  | "已梳理"
-  | "规划中"
-  | "开发完成"
-  | "实现中"
-  | "转测试"
-  | "测试中"
-  | "待验收"
-  | "已验收"
-  | "已解决"
-  | "已完成"
-  | "关闭";
+// 跟后端 types.ts 的 TICKET_STATUSES 保持一致。类型和筛选下拉都从这个数组派生，
+// 不再各写一份——以前新增状态值要改好几处，漏改就会在页面上筛不到
+export const TICKET_STATUSES = [
+  "新制",
+  "待处理",
+  "梳理中",
+  "已梳理",
+  "规划中",
+  "开发完成",
+  "实现中",
+  "转测试",
+  "测试中",
+  "待验收",
+  "已验收",
+  "已解决",
+  "已完成",
+  "关闭",
+] as const;
+export type TicketStatus = (typeof TICKET_STATUSES)[number];
 
 export type TicketStage =
   | "待分配"
