@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { DatePicker, Input, Select, Space, Button } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import type { Facets, TicketFilters } from "./useTickets";
+import { TICKET_STATUSES } from "../../api/types";
 
 const YES_NO_OPTIONS = [
   { value: "yes", label: "是" },
@@ -36,21 +37,7 @@ const STAGE_OPTIONS = [
   value: v,
   label: v,
 }));
-const STATUS_OPTIONS = [
-  "待处理",
-  "梳理中",
-  "已梳理",
-  "规划中",
-  "开发完成",
-  "实现中",
-  "转测试",
-  "测试中",
-  "待验收",
-  "已验收",
-  "已解决",
-  "已完成",
-  "关闭",
-].map((v) => ({ value: v, label: v }));
+const STATUS_OPTIONS = TICKET_STATUSES.map((v) => ({ value: v, label: v }));
 
 export default function FilterBar({
   filters,

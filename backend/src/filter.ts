@@ -144,6 +144,13 @@ export function applyOwningAppExclusion(tickets: Ticket[], excludedApps: string[
   return tickets.filter((t) => !excludedApps.includes(t.owningApp));
 }
 
+// 状态排除名单，语义与上面的归属应用排除完全一致，只是换个字段。
+// 典型用法是把"关闭""已完成"这类不需要日常盯的状态从工单中心收起来
+export function applyStatusExclusion(tickets: Ticket[], excludedStatuses: string[]): Ticket[] {
+  if (!excludedStatuses.length) return tickets;
+  return tickets.filter((t) => !excludedStatuses.includes(t.status));
+}
+
 export function scopeForActor(tickets: Ticket[], actor?: string, actorRole?: string): Ticket[] {
   if (!actor) return tickets;
   if (actorRole === "requester") {

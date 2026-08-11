@@ -3,7 +3,7 @@ import path from "path";
 import { v4 as uuid } from "uuid";
 import { DEPARTMENTS, SEED_ADMIN, generateAccounts } from "./seed";
 import { buildUserDirectory } from "./userDirectory";
-import { applyDisplayScope, applyOwningAppExclusion } from "./filter";
+import { applyDisplayScope, applyOwningAppExclusion, applyStatusExclusion } from "./filter";
 import { Account, ChangeLogEntry, Department, ScopeConfigItem, InSiteMessage, LogEntry, Ticket, User } from "./types";
 
 // 工单/处理记录/站内信/同步日志是真实业务数据（不是每次启动都重新生成的模拟数据），
@@ -29,6 +29,7 @@ interface PersistedState {
   fetchScopeHandlers: ScopeConfigItem[];
   displayCategories: ScopeConfigItem[];
   excludedOwningApps: ScopeConfigItem[];
+  excludedStatuses: ScopeConfigItem[];
   verifyTicketCodes: ScopeConfigItem[];
 }
 
@@ -68,6 +69,7 @@ class Store {
   fetchScopeHandlers: ScopeConfigItem[] = [];
   displayCategories: ScopeConfigItem[] = [];
   excludedOwningApps: ScopeConfigItem[] = [];
+  excludedStatuses: ScopeConfigItem[] = [];
   verifyTicketCodes: ScopeConfigItem[] = [];
 
   constructor() {
@@ -98,6 +100,7 @@ class Store {
       this.fetchScopeHandlers = parsed.fetchScopeHandlers ?? [];
       this.displayCategories = parsed.displayCategories ?? [];
       this.excludedOwningApps = parsed.excludedOwningApps ?? [];
+      this.excludedStatuses = parsed.excludedStatuses ?? [];
       this.verifyTicketCodes = parsed.verifyTicketCodes ?? [];
 
       // 兜底：管理员账号是锁定的、页面上删不掉，但万一落盘数据被手工改坏导致一个管理员都没有，
@@ -129,6 +132,7 @@ class Store {
         fetchScopeHandlers: this.fetchScopeHandlers,
         displayCategories: this.displayCategories,
         excludedOwningApps: this.excludedOwningApps,
+        excludedStatuses: this.excludedStatuses,
         verifyTicketCodes: this.verifyTicketCodes,
       };
       const tmpFile = `${DATA_FILE}.tmp`;
@@ -140,15 +144,17 @@ class Store {
   }
 
   /**
-   * 工单中心与各看板统一的可见数据源，两条范围配置依次收敛（两者是"与"的关系）：
+   * 工单中心与各看板统一的可见数据源，三条范围配置依次收敛（彼此是"与"的关系）：
    *   1. 分类显示范围：只保留配置里的分类
    *   2. 归属应用排除名单：去掉配置里的归属应用
+   *   3. 状态排除名单：去掉配置里的状态
    * 列表、统计卡片、导出、首页/开发工时/部门统计都必须用它，
-   * 否则会出现"看板数量跟列表对不上"。两项都为空时返回全部。
+   * 否则会出现"看板数量跟列表对不上"。三项都为空时返回全部。
    */
   get visibleTickets(): Ticket[] {
     const byCategory = applyDisplayScope(this.tickets, this.displayCategories.map((i) => i.value));
-    return applyOwningAppExclusion(byCategory, this.excludedOwningApps.map((i) => i.value));
+    const byApp = applyOwningAppExclusion(byCategory, this.excludedOwningApps.map((i) => i.value));
+    return applyStatusExclusion(byApp, this.excludedStatuses.map((i) => i.value));
   }
 
   getTicket(id: string) {

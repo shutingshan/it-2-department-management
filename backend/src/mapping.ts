@@ -30,7 +30,7 @@ function hasRealIteration(iterations: IterationRef[]): boolean {
  * 已梳理 + 已纳入迭代 + TAPD状态=转测试/测试中/待验收/已验收 -> 测试验收
  * 已梳理 + 已纳入迭代 + TAPD状态为其余情况（含尚未同步） -> 已排期（已纳入迭代，开发状态待同步）
  * 以下为规则未覆盖的原始状态值，沿用此前口径：
- * 待处理 -> 待分配；规划中 -> 方案梳理；其余未知状态 -> 待排期
+ * 新制/待处理 -> 待分配；规划中 -> 方案梳理；其余未知状态 -> 待排期
  * 规则命中优先级从上到下。
  */
 export function resolveStage(
@@ -46,7 +46,8 @@ export function resolveStage(
     if (devStatus && SCHEDULED_DEV_STATUS[devStatus]) return SCHEDULED_DEV_STATUS[devStatus];
     return "已排期";
   }
-  if (status === "待处理") return "待分配";
+  // 新制＝当曲云上刚提交、还没人接的工单，跟"待处理"一样落到"待分配"这个阶段
+  if (status === "新制" || status === "待处理") return "待分配";
   if (status === "规划中") return "方案梳理";
   return "待排期";
 }
