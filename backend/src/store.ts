@@ -24,11 +24,12 @@ interface PersistedState {
   // 一旦把它也落盘，以后更新 seed.ts 里的人员名单反而会被旧的落盘数据盖住、不生效
   departments: Department[];
   accounts: Account[];
-  // 范围配置：受理人（取数范围）/ 分类（工单中心显示范围）/ 归属应用（排除名单），
-  // 页面上可增删改，必须落盘
+  // 范围配置：受理人（取数范围）/ 分类（工单中心显示范围）/ 归属应用（排除名单）/
+  // 校验工单编号（抓取结果核验），页面上可增删改，必须落盘
   fetchScopeHandlers: ScopeConfigItem[];
   displayCategories: ScopeConfigItem[];
   excludedOwningApps: ScopeConfigItem[];
+  verifyTicketCodes: ScopeConfigItem[];
 }
 
 interface SyncJob {
@@ -67,6 +68,7 @@ class Store {
   fetchScopeHandlers: ScopeConfigItem[] = [];
   displayCategories: ScopeConfigItem[] = [];
   excludedOwningApps: ScopeConfigItem[] = [];
+  verifyTicketCodes: ScopeConfigItem[] = [];
 
   constructor() {
     this.load();
@@ -96,6 +98,7 @@ class Store {
       this.fetchScopeHandlers = parsed.fetchScopeHandlers ?? [];
       this.displayCategories = parsed.displayCategories ?? [];
       this.excludedOwningApps = parsed.excludedOwningApps ?? [];
+      this.verifyTicketCodes = parsed.verifyTicketCodes ?? [];
 
       // 兜底：管理员账号是锁定的、页面上删不掉，但万一落盘数据被手工改坏导致一个管理员都没有，
       // 就会彻底登不进系统、也没有任何入口能把它加回来。这里补一个回去，避免被锁在门外
@@ -126,6 +129,7 @@ class Store {
         fetchScopeHandlers: this.fetchScopeHandlers,
         displayCategories: this.displayCategories,
         excludedOwningApps: this.excludedOwningApps,
+        verifyTicketCodes: this.verifyTicketCodes,
       };
       const tmpFile = `${DATA_FILE}.tmp`;
       fs.writeFileSync(tmpFile, JSON.stringify(state));

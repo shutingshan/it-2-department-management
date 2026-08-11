@@ -32,8 +32,9 @@ export interface ScopeConfigItem {
 }
 
 // handlers=获取工单受理人范围；categories=工单中心显示分类；
-// excludedApps=工单中心排除的归属应用（排除语义，跟前两者相反）
-export type ScopeKind = "handlers" | "categories" | "excludedApps";
+// excludedApps=工单中心排除的归属应用（排除语义，跟前两者相反）；
+// verifyCodes=抓取结果核验用的工单编号
+export type ScopeKind = "handlers" | "categories" | "excludedApps" | "verifyCodes";
 
 export interface Account {
   id: string;

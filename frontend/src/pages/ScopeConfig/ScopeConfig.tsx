@@ -51,6 +51,16 @@ const SECTIONS: SectionMeta[] = [
     emptyHint: "当前未配置，表示不排除任何归属应用。",
     emptyTone: "info",
   },
+  {
+    kind: "verifyCodes",
+    title: "抓取结果校验工单编号",
+    description:
+      "「获取新工单」抓完后，会检查这些编号是否都出现在抓到的当曲云列表里；只要有一条对不上，就判定这次抓的不是目标列表，整份结果作废、不写入任何数据。请选长期稳定留在当曲云列表里的已完成工单。",
+    addLabel: "新增校验编号",
+    valueLabel: "工单编号",
+    emptyHint: "当前未配置，将自动取显示范围内最近完成的一条工单来校验。",
+    emptyTone: "info",
+  },
 ];
 
 export default function ScopeConfig() {
@@ -59,11 +69,13 @@ export default function ScopeConfig() {
     handlers: [],
     categories: [],
     excludedApps: [],
+    verifyCodes: [],
   });
   const [options, setOptions] = useState<Record<ScopeKind, string[]>>({
     handlers: [],
     categories: [],
     excludedApps: [],
+    verifyCodes: [],
   });
   const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState<{ section: SectionMeta; editing: ScopeConfigItem | null } | null>(null);
