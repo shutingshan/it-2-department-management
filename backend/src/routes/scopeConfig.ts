@@ -36,6 +36,15 @@ function listOf(kind: ScopeKind): ScopeConfigItem[] {
   return store.verifyTicketCodes;
 }
 
+// 状态是固定枚举，手输打错字必须当场拦下：否则会存成一条"看着生效、实际永远匹配不到"
+// 的规则，页面上还照常显示，排查起来毫无线索。其余几类是自由文本（人名/分类/应用名/
+// 工单编号），值域没法穷举，只能靠候选下拉减少手误
+function validateValue(kind: ScopeKind, value: string): string | null {
+  if (kind !== "excludedStatuses") return null;
+  if ((TICKET_STATUSES as readonly string[]).includes(value)) return null;
+  return `状态「${value}」不是合法取值，请从下拉候选中选择`;
+}
+
 function setList(kind: ScopeKind, list: ScopeConfigItem[]) {
   if (kind === "handlers") store.fetchScopeHandlers = list;
   else if (kind === "categories") store.displayCategories = list;
@@ -73,10 +82,12 @@ router.get("/options", (_req, res) => {
       // 状态是固定枚举，直接给全量取值，不从现有工单里取：某个状态当前一条工单都没有，
       // 不代表以后不会有，照样应该能提前配进排除名单
       excludedStatuses: [...TICKET_STATUSES],
-      // 校验工单候选只给显示范围内、且已完成的：核验用的工单必须是使用者在工单中心
-      // 能看到的，否则校验失败时连那条工单都查不到；已完成的工单不会再变动，最稳定
+      // 校验工单候选跟核验本身同源（verifiableTickets）：必须是使用者在工单中心能看到的，
+      // 否则校验失败时连那条工单都查不到；已完成的工单不会再变动，最稳定。
+      // 不能用 visibleTickets——把已完成配进状态排除后候选会空掉，
+      // 那时自动校验已经失效，却连手动配校验编号这条退路也一起没了
       verifyCodes: dedupe(
-        store.visibleTickets.filter((t) => t.stage === "已完成").map((t) => t.code).filter((v) => v && v.trim())
+        store.verifiableTickets.filter((t) => t.stage === "已完成").map((t) => t.code).filter((v) => v && v.trim())
       ).sort(),
     },
   });
@@ -87,6 +98,8 @@ router.post("/:kind", (req, res) => {
   if (!isKind(kind)) return res.status(400).json({ message: "配置类型不合法" });
   const value = String((req.body as { value?: unknown }).value ?? "").trim();
   if (!value) return res.status(400).json({ message: `请输入${KIND_LABELS[kind]}` });
+  const invalid = validateValue(kind, value);
+  if (invalid) return res.status(400).json({ message: invalid });
 
   const list = listOf(kind);
   if (list.some((i) => i.value === value)) {
@@ -107,6 +120,8 @@ router.patch("/:kind/:id", (req, res) => {
 
   const value = String((req.body as { value?: unknown }).value ?? "").trim();
   if (!value) return res.status(400).json({ message: `请输入${KIND_LABELS[kind]}` });
+  const invalid = validateValue(kind, value);
+  if (invalid) return res.status(400).json({ message: invalid });
   if (list.some((i) => i.id !== id && i.value === value)) {
     return res.status(400).json({ message: `${KIND_LABELS[kind]}「${value}」已存在` });
   }

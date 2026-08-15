@@ -144,6 +144,24 @@ class Store {
   }
 
   /**
+   * 抓取结果核验用的数据源：只按「分类范围」和「归属应用排除」收敛，
+   * 刻意**不含**状态排除。
+   *
+   * 核验挑的是 stage=已完成 的工单当基准，而状态排除最典型的用法恰恰是把
+   * 已完成/关闭收起来（页面提示里就是这么建议的）。若核验跟着状态排除走，
+   * 一配上这类规则基准集合就空了，校验会静默跳过——抓错列表也照单全收，
+   * 全量模式下还会用错误数据覆盖已有工单。
+   *
+   * 说到底，状态排除表达的是"日常不想看什么"，不该动摇"这份数据对不对"的判断基准；
+   * 而分类/归属应用表达的是"哪些数据跟我有关"，拿范围外的工单做核验，
+   * 一旦失败使用者在页面上都查不到那条工单，所以这两条要跟着走。
+   */
+  get verifiableTickets(): Ticket[] {
+    const byCategory = applyDisplayScope(this.tickets, this.displayCategories.map((i) => i.value));
+    return applyOwningAppExclusion(byCategory, this.excludedOwningApps.map((i) => i.value));
+  }
+
+  /**
    * 工单中心与各看板统一的可见数据源，三条范围配置依次收敛（彼此是"与"的关系）：
    *   1. 分类显示范围：只保留配置里的分类
    *   2. 归属应用排除名单：去掉配置里的归属应用
@@ -152,9 +170,7 @@ class Store {
    * 否则会出现"看板数量跟列表对不上"。三项都为空时返回全部。
    */
   get visibleTickets(): Ticket[] {
-    const byCategory = applyDisplayScope(this.tickets, this.displayCategories.map((i) => i.value));
-    const byApp = applyOwningAppExclusion(byCategory, this.excludedOwningApps.map((i) => i.value));
-    return applyStatusExclusion(byApp, this.excludedStatuses.map((i) => i.value));
+    return applyStatusExclusion(this.verifiableTickets, this.excludedStatuses.map((i) => i.value));
   }
 
   getTicket(id: string) {

@@ -88,9 +88,10 @@ router.get("/status", (req, res) => {
 //   2. 未配置时回落到自动挑选：显示范围内"已完成"里最近完成的一条。当曲云列表本身
 //      可能有时间范围之类的默认筛选，太久以前完成的工单不一定还留在列表里，用最近
 //      完成的能尽量避免"验证工单本来就没在列表里"这种误判
-// 自动挑选走 visibleTickets 而不是全量：分类范围/归属应用排除之外的工单在工单中心
-// 根本看不到，拿它做验证，一旦失败使用者在页面上都找不到那条工单，无从判断真假。
-// 一条可用的验证工单都没有时（没配置且显示范围内没有已完成工单）跳过校验
+// 自动挑选走 verifiableTickets：按分类范围/归属应用排除收敛（范围外的工单在工单中心
+// 看不到，拿它做验证一旦失败使用者都查不到那条工单），但不含状态排除——否则一旦把
+// 已完成/关闭配进状态排除，基准集合就空了，校验静默跳过，等于把这道防线拆了。
+// 一条可用的验证工单都没有时（没配置且范围内没有已完成工单）跳过校验
 export function verifyScrapedRowsAgainstCompletedTicket(rows: ScrapedRow[]) {
   const scrapedCodes = new Set(rows.map((r) => r["编号"]?.trim()).filter(Boolean));
 
@@ -105,7 +106,7 @@ export function verifyScrapedRowsAgainstCompletedTicket(rows: ScrapedRow[]) {
     return;
   }
 
-  const completed = store.visibleTickets.filter((t) => t.stage === "已完成");
+  const completed = store.verifiableTickets.filter((t) => t.stage === "已完成");
   if (completed.length === 0) return;
 
   const verificationTicket = [...completed].sort((a, b) =>
@@ -361,10 +362,31 @@ export function startUpdateTicketsJob(actor: string, filters?: unknown): { job: 
       scrapeError = (e as Error).message ?? "当曲云抓取失败";
     }
 
+    // 整份列表就没抓下来（环境变量没配、登录态失效、页面结构没识别出来……），
+    // 这跟"某条工单不在列表里"是两码事：错因只有一个，跟具体是哪条工单无关。
+    // 早期实现会把它平摊给每条候选工单，结果是刷出几百条一模一样的失败原因，
+    // 还给每条工单都盖上一个"当曲云异常备注"——那是配置问题造成的假异常，
+    // 得等下次同步成功才会被清掉。这里直接整单终止，一条原因说清楚，不碰任何工单
+    if (scrapeError) {
+      job.status = "failed";
+      job.finishedAt = dayjs().format("YYYY-MM-DD HH:mm:ss");
+      job.failReasons.push(scrapeError);
+      store.addLog({
+        type: "更新工单",
+        time: job.finishedAt,
+        actor,
+        success: false,
+        failReason: scrapeError,
+        detail: `批量更新终止：获取当曲云工单列表失败，${candidates.length} 条候选工单均未处理`,
+      });
+      finishJob(job);
+      return;
+    }
+
     for (const ticket of candidates) {
       if (job.status !== "running") break; // 被 /terminate 手动终止
 
-      const failReason = scrapeError ?? (rowsByCode.has(ticket.code) ? null : "当曲云工单列表中未找到该编号");
+      const failReason = rowsByCode.has(ticket.code) ? null : "当曲云工单列表中未找到该编号";
       if (failReason) {
         job.failed += 1;
         job.failReasons.push(`${ticket.code}: ${failReason}`);
@@ -411,9 +433,7 @@ export function startUpdateTicketsJob(actor: string, filters?: unknown): { job: 
         actor,
         success: job.failed === 0,
         failReason: job.failed ? job.failReasons.join("; ") : null,
-        detail: scrapeError
-          ? `批量更新失败：获取当曲云工单列表出错（${scrapeError}）`
-          : `批量更新完成，成功 ${job.success} 条，失败 ${job.failed} 条`,
+        detail: `批量更新完成，成功 ${job.success} 条，失败 ${job.failed} 条`,
       });
     }
     finishJob(job);
