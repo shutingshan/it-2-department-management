@@ -66,12 +66,14 @@ if (fs.existsSync(frontendDist)) {
   });
 }
 
-// 显式监听 0.0.0.0：同事在同一局域网内可通过本机的局域网 IP 访问，无需额外部署
+// 显式监听 0.0.0.0：让前端开发服务器（Vite）能跨机器代理到这个后端接口
 app.listen(Number(PORT), "0.0.0.0", () => {
   console.log(`IT 二部工单中心系统 后端已启动: http://localhost:${PORT}`);
   const lanUrls = getLanUrls(Number(PORT));
   if (lanUrls.length > 0) {
-    console.log(`局域网访问地址（同事可用）: ${lanUrls.join(", ")}`);
+    // 注意：这里只是后端 API 地址，不能直接发给同事打开——
+    // 开发模式下登录页面由前端 Vite（5173 端口）提供，同事应访问前端打印出的 Network 地址
+    console.log(`后端局域网地址（仅供调试 /api 接口，不要发给同事）: ${lanUrls.join(", ")}`);
   }
 });
 
