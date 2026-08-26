@@ -47,8 +47,10 @@ router.get("/codes", (_req, res) => {
 
 router.get("/", (req, res) => {
   const q = parseQuery(req.query as Record<string, unknown>);
-  const { actor, actorRole } = req.query as { actor?: string; actorRole?: string };
-  const scoped = scopeForActor(store.visibleTickets, actor, actorRole);
+  const { actor, actorRole, scope } = req.query as { actor?: string; actorRole?: string; scope?: string };
+  // scope=defect：缺陷跟进页，分类范围走 defectCategories 而不是工单中心那份
+  const base = scope === "defect" ? store.defectVisibleTickets : store.visibleTickets;
+  const scoped = scopeForActor(base, actor, actorRole);
   const filtered = applyFilters(scoped, q);
 
   const page = Number(req.query.page ?? 1);

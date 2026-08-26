@@ -12,6 +12,10 @@ import { Account, ChangeLogEntry, Department, ScopeConfigItem, InSiteMessage, Lo
 const DATA_DIR = path.join(__dirname, "../data");
 const DATA_FILE = path.join(DATA_DIR, "store.json");
 
+// 缺陷跟进页的默认分类范围。不像其余范围配置那样「空=不限制」就够用：
+// 这个页面的意义就是只看缺陷，一上来不限制反而会把需求也列进来
+const DEFAULT_DEFECT_CATEGORIES = (): ScopeConfigItem[] => [{ id: uuid(), value: "缺陷" }];
+
 interface PersistedState {
   tickets: Ticket[];
   messages: InSiteMessage[];
@@ -31,6 +35,9 @@ interface PersistedState {
   excludedOwningApps: ScopeConfigItem[];
   excludedStatuses: ScopeConfigItem[];
   verifyTicketCodes: ScopeConfigItem[];
+  // 缺陷跟进页的分类范围。跟 displayCategories（工单中心）刻意分开：
+  // 工单中心通常只留「需求」，缺陷跟进要看的正是被它挡掉的那些分类
+  defectCategories: ScopeConfigItem[];
 }
 
 interface SyncJob {
@@ -71,6 +78,7 @@ class Store {
   excludedOwningApps: ScopeConfigItem[] = [];
   excludedStatuses: ScopeConfigItem[] = [];
   verifyTicketCodes: ScopeConfigItem[] = [];
+  defectCategories: ScopeConfigItem[] = DEFAULT_DEFECT_CATEGORIES();
 
   constructor() {
     this.load();
@@ -109,6 +117,9 @@ class Store {
       this.excludedOwningApps = parsed.excludedOwningApps ?? [];
       this.excludedStatuses = parsed.excludedStatuses ?? [];
       this.verifyTicketCodes = parsed.verifyTicketCodes ?? [];
+      // 老的 store.json 里没有这个键（undefined）才用默认的「缺陷」打底；
+      // 管理员确实把它删空了存的是 []，那是有效状态（=不限分类），要原样保留
+      this.defectCategories = parsed.defectCategories ?? DEFAULT_DEFECT_CATEGORIES();
 
       // 兜底：管理员账号是锁定的、页面上删不掉，但万一落盘数据被手工改坏导致一个管理员都没有，
       // 就会彻底登不进系统、也没有任何入口能把它加回来。这里补一个回去，避免被锁在门外
@@ -141,6 +152,7 @@ class Store {
         excludedOwningApps: this.excludedOwningApps,
         excludedStatuses: this.excludedStatuses,
         verifyTicketCodes: this.verifyTicketCodes,
+        defectCategories: this.defectCategories,
       };
       const tmpFile = `${DATA_FILE}.tmp`;
       fs.writeFileSync(tmpFile, JSON.stringify(state));
@@ -160,6 +172,14 @@ class Store {
    */
   get visibleTickets(): Ticket[] {
     const byCategory = applyDisplayScope(this.tickets, this.displayCategories.map((i) => i.value));
+    const byApp = applyOwningAppExclusion(byCategory, this.excludedOwningApps.map((i) => i.value));
+    return applyStatusExclusion(byApp, this.excludedStatuses.map((i) => i.value));
+  }
+
+  // 缺陷跟进页的可见范围：分类换成 defectCategories，其余（归属应用/状态排除）沿用同一套配置。
+  // 分类必须走自己这份，否则工单中心一旦配成只看「需求」，缺陷跟进页就一条都剩不下
+  get defectVisibleTickets(): Ticket[] {
+    const byCategory = applyDisplayScope(this.tickets, this.defectCategories.map((i) => i.value));
     const byApp = applyOwningAppExclusion(byCategory, this.excludedOwningApps.map((i) => i.value));
     return applyStatusExclusion(byApp, this.excludedStatuses.map((i) => i.value));
   }

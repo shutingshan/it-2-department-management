@@ -9,10 +9,17 @@ const router = Router();
 // 每类范围各一张表，路径上用 kind 区分，避免写好几套一模一样的增删改查。
 // 注意语义分两种：excludedApps / excludedStatuses 是排除（配了就不显示），
 // handlers / categories 是保留（配了就只要这些），verifyCodes 则是抓取结果核验用的基准
-type ScopeKind = "handlers" | "categories" | "excludedApps" | "excludedStatuses" | "verifyCodes";
+type ScopeKind =
+  | "handlers"
+  | "categories"
+  | "defectCategories"
+  | "excludedApps"
+  | "excludedStatuses"
+  | "verifyCodes";
 const KIND_LABELS: Record<ScopeKind, string> = {
   handlers: "受理人",
   categories: "工单分类",
+  defectCategories: "工单分类",
   excludedApps: "归属应用",
   excludedStatuses: "状态",
   verifyCodes: "校验工单编号",
@@ -22,6 +29,7 @@ function isKind(v: string): v is ScopeKind {
   return (
     v === "handlers" ||
     v === "categories" ||
+    v === "defectCategories" ||
     v === "excludedApps" ||
     v === "excludedStatuses" ||
     v === "verifyCodes"
@@ -31,6 +39,7 @@ function isKind(v: string): v is ScopeKind {
 function listOf(kind: ScopeKind): ScopeConfigItem[] {
   if (kind === "handlers") return store.fetchScopeHandlers;
   if (kind === "categories") return store.displayCategories;
+  if (kind === "defectCategories") return store.defectCategories;
   if (kind === "excludedApps") return store.excludedOwningApps;
   if (kind === "excludedStatuses") return store.excludedStatuses;
   return store.verifyTicketCodes;
@@ -39,6 +48,7 @@ function listOf(kind: ScopeKind): ScopeConfigItem[] {
 function setList(kind: ScopeKind, list: ScopeConfigItem[]) {
   if (kind === "handlers") store.fetchScopeHandlers = list;
   else if (kind === "categories") store.displayCategories = list;
+  else if (kind === "defectCategories") store.defectCategories = list;
   else if (kind === "excludedApps") store.excludedOwningApps = list;
   else if (kind === "excludedStatuses") store.excludedStatuses = list;
   else store.verifyTicketCodes = list;
@@ -50,6 +60,7 @@ router.get("/", (_req, res) => {
     data: {
       handlers: store.fetchScopeHandlers,
       categories: store.displayCategories,
+      defectCategories: store.defectCategories,
       excludedApps: store.excludedOwningApps,
       excludedStatuses: store.excludedStatuses,
       verifyCodes: store.verifyTicketCodes,
@@ -69,6 +80,8 @@ router.get("/options", (_req, res) => {
     data: {
       handlers: dedupe(store.tickets.map((t) => t.itHandler).filter((v) => v && v.trim())).sort(),
       categories: dedupe(store.tickets.map((t) => t.category).filter((v) => v && v.trim())).sort(),
+      // 缺陷跟进的分类候选跟工单中心同源：都是全量工单里出现过的分类
+      defectCategories: dedupe(store.tickets.map((t) => t.category).filter((v) => v && v.trim())).sort(),
       excludedApps: dedupe(store.tickets.map((t) => t.owningApp).filter((v) => v && v.trim())).sort(),
       // 状态是固定枚举，直接给全量取值，不从现有工单里取：某个状态当前一条工单都没有，
       // 不代表以后不会有，照样应该能提前配进排除名单

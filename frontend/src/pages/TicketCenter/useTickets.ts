@@ -22,6 +22,8 @@ export interface TicketFilters {
   cardKey?: string;
   sortField?: string;
   sortOrder?: "asc" | "desc";
+  // "defect"=走缺陷跟进的分类范围配置；不传则走工单中心那份
+  scope?: "defect";
 }
 
 export interface Facets {

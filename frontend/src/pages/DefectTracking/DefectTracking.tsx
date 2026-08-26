@@ -192,13 +192,14 @@ function InlineSpentHoursInput({ ticket, onSaved }: { ticket: Ticket; onSaved: (
 // 缺陷跟进：工单中心的一个专属视角，固定只看"分类=缺陷"的工单，只展示同事关心的几列
 export default function DefectTracking() {
   const { refreshTick } = useOutletContext<{ refreshTick: number }>();
-  const [extraFilters, setExtraFilters] = useState<Omit<TicketFilters, "category" | "sortField" | "sortOrder">>({});
+  const [extraFilters, setExtraFilters] = useState<Omit<TicketFilters, "scope" | "sortField" | "sortOrder">>({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
+  // 显示哪些分类不写死在这里，由「取数与显示范围 → 缺陷跟进显示分类」配置决定（scope=defect）
   const filters: TicketFilters = {
     ...extraFilters,
-    category: ["缺陷"],
+    scope: "defect",
     sortField: "submittedAt",
     sortOrder: "desc",
   };

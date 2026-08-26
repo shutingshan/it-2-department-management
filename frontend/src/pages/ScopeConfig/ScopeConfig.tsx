@@ -42,6 +42,15 @@ const SECTIONS: SectionMeta[] = [
     emptyHint: "当前未配置，表示不按分类限制，工单中心显示全部分类。",
   },
   {
+    kind: "defectCategories",
+    title: "缺陷跟进显示分类",
+    description:
+      "缺陷跟进页只显示分类命中下表的工单。这一项跟上面的「工单中心显示分类」相互独立：工单中心通常只留「需求」，缺陷跟进要看的正是被它挡掉的分类，所以两边各配各的。归属应用与状态的排除名单两个页面共用。",
+    addLabel: "新增分类",
+    valueLabel: "工单分类",
+    emptyHint: "当前未配置，表示不按分类限制，缺陷跟进页会显示全部分类的工单。",
+  },
+  {
     kind: "excludedApps",
     title: "工单中心排除的归属应用",
     description:
@@ -78,6 +87,7 @@ export default function ScopeConfig() {
   const [data, setData] = useState<Record<ScopeKind, ScopeConfigItem[]>>({
     handlers: [],
     categories: [],
+    defectCategories: [],
     excludedApps: [],
     excludedStatuses: [],
     verifyCodes: [],
@@ -85,6 +95,7 @@ export default function ScopeConfig() {
   const [options, setOptions] = useState<Record<ScopeKind, string[]>>({
     handlers: [],
     categories: [],
+    defectCategories: [],
     excludedApps: [],
     excludedStatuses: [],
     verifyCodes: [],
