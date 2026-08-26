@@ -1,7 +1,14 @@
 import { Router } from "express";
 import dayjs from "dayjs";
 import { backupStoreFile, store } from "../store";
-import { applyFilters, canViewTicket, parseQuery, scopeForActor, TicketQuery } from "../filter";
+import {
+  applyFilters,
+  canViewTicket,
+  parseQuery,
+  scopeForActor,
+  scopeForDefectActor,
+  TicketQuery,
+} from "../filter";
 import { dedupe, stripCurrentIterationTag } from "../mapping";
 import { computeCardStats } from "../cards";
 import { ChangeLogEntry } from "../types";
@@ -48,9 +55,13 @@ router.get("/codes", (_req, res) => {
 router.get("/", (req, res) => {
   const q = parseQuery(req.query as Record<string, unknown>);
   const { actor, actorRole, scope } = req.query as { actor?: string; actorRole?: string; scope?: string };
-  // scope=defect：缺陷跟进页，分类范围走 defectCategories 而不是工单中心那份
-  const base = scope === "defect" ? store.defectVisibleTickets : store.visibleTickets;
-  const scoped = scopeForActor(base, actor, actorRole);
+  // scope=defect：缺陷跟进页，分类范围走 defectCategories 而不是工单中心那份，
+  // 可见范围也换成「受理人或发起人是本人」（见 scopeForDefectActor）
+  const isDefect = scope === "defect";
+  const base = isDefect ? store.defectVisibleTickets : store.visibleTickets;
+  const scoped = isDefect
+    ? scopeForDefectActor(base, actor, actorRole)
+    : scopeForActor(base, actor, actorRole);
   const filtered = applyFilters(scoped, q);
 
   const page = Number(req.query.page ?? 1);

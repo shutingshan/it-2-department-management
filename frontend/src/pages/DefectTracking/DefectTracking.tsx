@@ -7,16 +7,23 @@ import { TICKET_STATUSES } from "../../api/types";
 import { useOutletContext } from "react-router-dom";
 import { api } from "../../api/client";
 import { useAuthStore } from "../../store/auth";
-import { useTickets } from "../TicketCenter/useTickets";
+import { EMPTY_TOKEN, useTickets } from "../TicketCenter/useTickets";
 import type { TicketFilters } from "../TicketCenter/useTickets";
 import dayjs from "dayjs";
+
+const { RangePicker } = DatePicker;
 
 const STATUS_OPTIONS = TICKET_STATUSES.map((v) => ({ value: v, label: v }));
 const YES_NO_OPTIONS = [
   { value: "yes", label: "是" },
   { value: "no", label: "否" },
 ];
-const COMPLETION_OPTIONS = ["未开始", "进行中", "已完成"].map((v) => ({ value: v, label: v }));
+const COMPLETION_VALUES = ["未开始", "进行中", "已完成"] as const;
+const COMPLETION_OPTIONS = COMPLETION_VALUES.map((v) => ({ value: v, label: v }));
+
+// 筛选下拉比录入下拉多一个「未填写」，用于把还没维护的数据挑出来补齐
+const YES_NO_FILTER_OPTIONS = [...YES_NO_OPTIONS, { value: EMPTY_TOKEN, label: "未填写" }];
+const COMPLETION_FILTER_OPTIONS = [...COMPLETION_OPTIONS, { value: EMPTY_TOKEN, label: "未填写" }];
 
 // 标题/内容较长，单元格省略号截断，点击后弹出完整内容
 function ExpandableCell({ text }: { text: string }) {
@@ -271,9 +278,9 @@ export default function DefectTracking() {
           <Input
             size="small"
             allowClear
-            style={{ width: 260 }}
+            style={{ width: 240 }}
             prefix={<SearchOutlined />}
-            placeholder="搜索标题/内容"
+            placeholder="搜索编号/标题/内容/人员"
             value={extraFilters.search}
             onChange={(e) => setFilter("search", e.target.value || undefined)}
           />
@@ -281,12 +288,48 @@ export default function DefectTracking() {
             size="small"
             mode="multiple"
             allowClear
+            placeholder="分类"
+            style={{ minWidth: 110 }}
+            showSearch
+            options={facets.categories.map((v) => ({ value: v, label: v }))}
+            value={extraFilters.category}
+            onChange={(v) => setFilter("category", v.length ? v : undefined)}
+            maxTagCount={1}
+          />
+          <Select
+            size="small"
+            mode="multiple"
+            allowClear
             placeholder="归属应用"
-            style={{ minWidth: 150 }}
+            style={{ minWidth: 140 }}
             showSearch
             options={facets.owningApps.map((v) => ({ value: v, label: v }))}
             value={extraFilters.owningApp}
             onChange={(v) => setFilter("owningApp", v.length ? v : undefined)}
+            maxTagCount={1}
+          />
+          <Select
+            size="small"
+            mode="multiple"
+            allowClear
+            placeholder="发起人"
+            style={{ minWidth: 100 }}
+            showSearch
+            options={facets.requesters.map((v) => ({ value: v, label: v }))}
+            value={extraFilters.requester}
+            onChange={(v) => setFilter("requester", v.length ? v : undefined)}
+            maxTagCount={1}
+          />
+          <Select
+            size="small"
+            mode="multiple"
+            allowClear
+            placeholder="受理人"
+            style={{ minWidth: 100 }}
+            showSearch
+            options={facets.itHandlers.map((v) => ({ value: v, label: v }))}
+            value={extraFilters.itHandler}
+            onChange={(v) => setFilter("itHandler", v.length ? v : undefined)}
             maxTagCount={1}
           />
           <Select
@@ -300,6 +343,110 @@ export default function DefectTracking() {
             onChange={(v) => setFilter("status", v.length ? v : undefined)}
             maxTagCount={1}
           />
+          <RangePicker
+            size="small"
+            placeholder={["创建时间起", "创建时间止"]}
+            value={
+              extraFilters.submittedFrom || extraFilters.submittedTo
+                ? [
+                    extraFilters.submittedFrom ? dayjs(extraFilters.submittedFrom) : null,
+                    extraFilters.submittedTo ? dayjs(extraFilters.submittedTo) : null,
+                  ]
+                : null
+            }
+            onChange={(vals) => {
+              setExtraFilters((f) => ({
+                ...f,
+                submittedFrom: vals?.[0] ? vals[0].format("YYYY-MM-DD") : undefined,
+                submittedTo: vals?.[1] ? vals[1].format("YYYY-MM-DD 23:59") : undefined,
+              }));
+              setPage(1);
+            }}
+          />
+          <Select
+            size="small"
+            mode="multiple"
+            allowClear
+            placeholder="是否有测试用例"
+            style={{ minWidth: 150 }}
+            options={YES_NO_FILTER_OPTIONS}
+            value={extraFilters.hasTestCase}
+            onChange={(v) => setFilter("hasTestCase", v.length ? v : undefined)}
+            maxTagCount={1}
+          />
+          <Select
+            size="small"
+            mode="multiple"
+            allowClear
+            placeholder="是否已补充测试用例"
+            style={{ minWidth: 170 }}
+            options={YES_NO_FILTER_OPTIONS}
+            value={extraFilters.testCaseSupplemented}
+            onChange={(v) => setFilter("testCaseSupplemented", v.length ? v : undefined)}
+            maxTagCount={1}
+          />
+          <Select
+            size="small"
+            mode="multiple"
+            allowClear
+            placeholder="是否做自动化测试"
+            style={{ minWidth: 160 }}
+            options={YES_NO_FILTER_OPTIONS}
+            value={extraFilters.hasAutomatedTest}
+            onChange={(v) => setFilter("hasAutomatedTest", v.length ? v : undefined)}
+            maxTagCount={1}
+          />
+          <RangePicker
+            size="small"
+            placeholder={["自动化计划起", "自动化计划止"]}
+            value={
+              extraFilters.automationFrom || extraFilters.automationTo
+                ? [
+                    extraFilters.automationFrom ? dayjs(extraFilters.automationFrom) : null,
+                    extraFilters.automationTo ? dayjs(extraFilters.automationTo) : null,
+                  ]
+                : null
+            }
+            onChange={(vals) => {
+              setExtraFilters((f) => ({
+                ...f,
+                automationFrom: vals?.[0] ? vals[0].format("YYYY-MM-DD") : undefined,
+                automationTo: vals?.[1] ? vals[1].format("YYYY-MM-DD") : undefined,
+              }));
+              setPage(1);
+            }}
+          />
+          <Select
+            size="small"
+            mode="multiple"
+            allowClear
+            placeholder="完成情况"
+            style={{ minWidth: 120 }}
+            options={COMPLETION_FILTER_OPTIONS}
+            value={extraFilters.completionStatus}
+            onChange={(v) => setFilter("completionStatus", v.length ? v : undefined)}
+            maxTagCount={1}
+          />
+          <Space.Compact>
+            <InputNumber
+              size="small"
+              style={{ width: 100 }}
+              min={0}
+              step={0.5}
+              placeholder="工时≥"
+              value={extraFilters.spentHoursMin ?? undefined}
+              onChange={(v) => setFilter("spentHoursMin", v ?? undefined)}
+            />
+            <InputNumber
+              size="small"
+              style={{ width: 100 }}
+              min={0}
+              step={0.5}
+              placeholder="工时≤"
+              value={extraFilters.spentHoursMax ?? undefined}
+              onChange={(v) => setFilter("spentHoursMax", v ?? undefined)}
+            />
+          </Space.Compact>
           <Button
             size="small"
             onClick={() => {

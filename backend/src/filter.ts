@@ -22,7 +22,22 @@ export interface TicketQuery {
   cardKey?: string;
   sortField?: string;
   sortOrder?: "asc" | "desc";
+  // 缺陷跟进页的人工维护字段。三态字段（是/否/未填写）用字符串数组表达，
+  // 而不是复用上面 urgent 那种 boolean——boolean 表达不了"未填写"这第三种取值，
+  // 也没法多选（比如同时看"否"和"未填写"这些待补齐的）
+  hasTestCase?: string[];
+  testCaseSupplemented?: string[];
+  hasAutomatedTest?: string[];
+  completionStatus?: string[];
+  automationFrom?: string;
+  automationTo?: string;
+  spentHoursMin?: number;
+  spentHoursMax?: number;
 }
+
+// "未填写"在筛选参数里的表示。用不会跟真实取值撞车的哨兵值，
+// 空字符串会被 toArray 当成"没传"而整条筛选失效
+export const EMPTY_TOKEN = "__empty__";
 
 function toArray(v: unknown): string[] | undefined {
   if (v === undefined || v === null || v === "") return undefined;
@@ -38,6 +53,19 @@ function toBool(v: unknown): boolean | undefined {
   if (v === "true") return true;
   if (v === "false") return false;
   return undefined;
+}
+
+// 数值筛选同样要兼容 GET 查询串（字符串）与 JSON body（数字）两种来源
+function toNumber(v: unknown): number | undefined {
+  if (v === undefined || v === null || v === "") return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+// 三态字段（boolean | null）匹配：null 只被"未填写"命中
+function matchesTriState(value: boolean | null | undefined, selected: string[]): boolean {
+  if (value === null || value === undefined) return selected.includes(EMPTY_TOKEN);
+  return selected.includes(value ? "yes" : "no");
 }
 
 export function parseQuery(q: Record<string, unknown>): TicketQuery {
@@ -60,6 +88,14 @@ export function parseQuery(q: Record<string, unknown>): TicketQuery {
     cardKey: q.cardKey ? String(q.cardKey) : undefined,
     sortField: q.sortField ? String(q.sortField) : "submittedAt",
     sortOrder: q.sortOrder === "asc" ? "asc" : "desc",
+    hasTestCase: toArray(q.hasTestCase),
+    testCaseSupplemented: toArray(q.testCaseSupplemented),
+    hasAutomatedTest: toArray(q.hasAutomatedTest),
+    completionStatus: toArray(q.completionStatus),
+    automationFrom: q.automationFrom ? String(q.automationFrom) : undefined,
+    automationTo: q.automationTo ? String(q.automationTo) : undefined,
+    spentHoursMin: toNumber(q.spentHoursMin),
+    spentHoursMax: toNumber(q.spentHoursMax),
   };
 }
 
@@ -105,6 +141,27 @@ export function applyFilters(tickets: Ticket[], q: TicketQuery): Ticket[] {
   if (q.watcher?.length) result = result.filter((t) => t.watcher.some((w) => q.watcher!.includes(w)));
   if (q.itHandler?.length) result = result.filter((t) => q.itHandler!.includes(t.itHandler));
   if (q.hasTapd !== undefined) result = result.filter((t) => (t.tapdUrl !== null) === q.hasTapd);
+
+  // 缺陷跟进的人工维护字段
+  if (q.hasTestCase?.length)
+    result = result.filter((t) => matchesTriState(t.hasTestCase, q.hasTestCase!));
+  if (q.testCaseSupplemented?.length)
+    result = result.filter((t) => matchesTriState(t.testCaseSupplemented, q.testCaseSupplemented!));
+  if (q.hasAutomatedTest?.length)
+    result = result.filter((t) => matchesTriState(t.hasAutomatedTest, q.hasAutomatedTest!));
+  // 完成情况空字符串＝未填写，映射到哨兵值再比对
+  if (q.completionStatus?.length)
+    result = result.filter((t) => q.completionStatus!.includes(t.completionStatus || EMPTY_TOKEN));
+  // 时间/工时区间：未填写的一律不落在任何区间内（跟"筛了范围就是要看填了值的"直觉一致）
+  if (q.automationFrom)
+    result = result.filter((t) => !!t.automationPlanCompleteTime && t.automationPlanCompleteTime >= q.automationFrom!);
+  if (q.automationTo)
+    result = result.filter((t) => !!t.automationPlanCompleteTime && t.automationPlanCompleteTime <= q.automationTo!);
+  if (q.spentHoursMin !== undefined)
+    result = result.filter((t) => t.spentHours !== null && t.spentHours >= q.spentHoursMin!);
+  if (q.spentHoursMax !== undefined)
+    result = result.filter((t) => t.spentHours !== null && t.spentHours <= q.spentHoursMax!);
+
   if (q.cardKey) result = filterByCard(result, q.cardKey);
 
   const field = q.sortField ?? "submittedAt";
@@ -160,6 +217,15 @@ export function scopeForActor(tickets: Ticket[], actor?: string, actorRole?: str
     return tickets.filter((t) => t.itHandler === actor);
   }
   return tickets;
+}
+
+// 缺陷跟进页的可见范围，跟工单中心刻意不同：只要「受理人」或「发起人」是本人就能看到。
+// 工单中心那套按角色分叉（受理人只看自己受理的、需求方只看自己发起或关注的）在这里不合用——
+// 缺陷要两边一起跟：提缺陷的人要能看到修得怎么样，修缺陷的人要能看到自己手上有哪些。
+// 管理员仍然看全部，否则没人能纵览所有缺陷
+export function scopeForDefectActor(tickets: Ticket[], actor?: string, actorRole?: string): Ticket[] {
+  if (!actor || actorRole === "admin") return tickets;
+  return tickets.filter((t) => t.itHandler === actor || t.requester === actor);
 }
 
 export function canViewTicket(ticket: Ticket, actor?: string, actorRole?: string): boolean {

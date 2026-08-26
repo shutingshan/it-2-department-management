@@ -24,7 +24,19 @@ export interface TicketFilters {
   sortOrder?: "asc" | "desc";
   // "defect"=走缺陷跟进的分类范围配置；不传则走工单中心那份
   scope?: "defect";
+  // 缺陷跟进页的人工维护字段。三态字段取值为 yes / no / __empty__（未填写）
+  hasTestCase?: string[];
+  testCaseSupplemented?: string[];
+  hasAutomatedTest?: string[];
+  completionStatus?: string[];
+  automationFrom?: string;
+  automationTo?: string;
+  spentHoursMin?: number;
+  spentHoursMax?: number;
 }
+
+// 「未填写」在筛选参数里的表示，跟后端 filter.ts 的 EMPTY_TOKEN 保持一致
+export const EMPTY_TOKEN = "__empty__";
 
 export interface Facets {
   requesters: string[];
