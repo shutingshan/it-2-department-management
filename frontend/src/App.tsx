@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import Login from "./pages/Login";
 import AppShell from "./layout/AppShell";
 import TicketCenter from "./pages/TicketCenter/TicketCenter";
+import DefectTracking from "./pages/DefectTracking/DefectTracking";
 import Home from "./pages/Home/Home";
 import DevHours from "./pages/DevHours/DevHours";
 import DeptStats from "./pages/DeptStats/DeptStats";
@@ -18,6 +19,7 @@ export default function App() {
         <Route index element={<Navigate to="/tickets" replace />} />
         <Route path="home" element={<Home />} />
         <Route path="tickets" element={<TicketCenter />} />
+        <Route path="defects" element={<DefectTracking />} />
         <Route path="dev-hours" element={<DevHours />} />
         <Route path="departments" element={<DeptStats />} />
         <Route path="account-config" element={<AccountConfig />} />

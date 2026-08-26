@@ -5,6 +5,7 @@ import {
   ApartmentOutlined,
   AppstoreOutlined,
   BarChartOutlined,
+  BugOutlined,
   ClusterOutlined,
   FilterOutlined,
   HistoryOutlined,
@@ -30,6 +31,7 @@ const { Sider, Header, Content } = Layout;
 const BASE_MENU_ITEMS = [
   { key: "/home", icon: <HomeOutlined />, label: "首页" },
   { key: "/tickets", icon: <AppstoreOutlined />, label: "工单中心" },
+  { key: "/defects", icon: <BugOutlined />, label: "缺陷跟进" },
   { key: "/dev-hours", icon: <BarChartOutlined />, label: "开发工时统计" },
   { key: "/departments", icon: <ClusterOutlined />, label: "部门统计" },
 ];
