@@ -157,13 +157,12 @@ router.patch("/:id", (req, res) => {
   if (!actor) return res.status(400).json({ message: "缺少操作人信息，无法提交" });
 
   if (view === "defect") {
-    // 缺陷跟进页：看得到就改得动（受理人或发起人是本人即可，管理员不受限）。
-    // 这里必须同时确认工单确实落在缺陷范围内——否则客户端只要带上 view=defect，
+    // 缺陷跟进页：数据对所有登录用户公开，且「看得到就改得动」，故这里不再按人收敛。
+    // 但仍必须确认工单确实落在缺陷范围内——否则客户端只要带上 view=defect，
     // 就能绕过下面工单中心那套更严的编辑权限去改别的分类的工单
     const inDefectScope = store.defectVisibleTickets.some((t) => t.id === ticket.id);
-    const allowed = actorRole === "admin" || ticket.itHandler === actor || ticket.requester === actor;
-    if (!inDefectScope || !allowed) {
-      return res.status(403).json({ message: "无权限：仅能编辑本人受理或发起的缺陷" });
+    if (!inDefectScope) {
+      return res.status(403).json({ message: "无权限：该工单不在缺陷跟进范围内" });
     }
   } else {
     // IT 受理人仅可编辑自己负责的数据；需求方仅可编辑发起人或关注人包含本人的数据

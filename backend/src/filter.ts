@@ -227,13 +227,18 @@ export function scopeForActor(tickets: Ticket[], actor?: string, actorRole?: str
   return tickets;
 }
 
-// 缺陷跟进页的可见范围，跟工单中心刻意不同：只要「受理人」或「发起人」是本人就能看到。
-// 工单中心那套按角色分叉（受理人只看自己受理的、需求方只看自己发起或关注的）在这里不合用——
-// 缺陷要两边一起跟：提缺陷的人要能看到修得怎么样，修缺陷的人要能看到自己手上有哪些。
-// 管理员仍然看全部，否则没人能纵览所有缺陷
-export function scopeForDefectActor(tickets: Ticket[], actor?: string, actorRole?: string): Ticket[] {
-  if (!actor || actorRole === "admin") return tickets;
-  return tickets.filter((t) => t.itHandler === actor || t.requester === actor);
+/**
+ * 缺陷跟进页的可见范围：数据对所有登录用户公开，不按身份收敛。
+ *
+ * 跟工单中心（受理人只看自己受理的、需求方只看自己发起或关注的）刻意不同——
+ * 缺陷跟进是一块全员共用的看板，谁都得看得到全量缺陷才能协作跟进。
+ * 想只看跟自己相关的，用头部「切换人员」或筛选栏的发起人/受理人下拉即可。
+ *
+ * 保留这个函数而不是直接省掉调用，是为了给"缺陷页的可见范围"留一个唯一的落点：
+ * 以后要收窄，改这里一处，列表/导出/落地页判断会一起生效。
+ */
+export function scopeForDefectActor(tickets: Ticket[], _actor?: string, _actorRole?: string): Ticket[] {
+  return tickets;
 }
 
 export function canViewTicket(ticket: Ticket, actor?: string, actorRole?: string): boolean {
