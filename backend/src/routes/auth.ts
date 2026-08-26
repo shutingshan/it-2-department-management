@@ -16,7 +16,7 @@ const router = Router();
 function resolveLandingPage(user: { name: string; role: string }): string {
   if (user.role === "admin") return "/tickets";
   if (scopeForActor(store.visibleTickets, user.name, user.role).length > 0) return "/tickets";
-  const defects = scopeForDefectActor(store.defectVisibleTickets, canAccessDefects(user.name, user.role));
+  const defects = scopeForDefectActor(store.defectVisibleTickets, canAccessDefects(user.name));
   if (defects.length > 0) return "/defects";
   return "/tickets";
 }

@@ -33,9 +33,6 @@ export interface TicketQuery {
   automationTo?: string;
   spentHoursMin?: number;
   spentHoursMax?: number;
-  // 头部「切换人员」选中的查看对象。刻意不复用 itHandler：筛选栏里的「受理人」下拉用的是
-  // itHandler，两者若共用一个键会互相覆盖；而且这里的口径是「受理人或发起人」，比 itHandler 宽
-  viewTargets?: string[];
 }
 
 // "未填写"在筛选参数里的表示。用不会跟真实取值撞车的哨兵值，
@@ -99,7 +96,6 @@ export function parseQuery(q: Record<string, unknown>): TicketQuery {
     automationTo: q.automationTo ? String(q.automationTo) : undefined,
     spentHoursMin: toNumber(q.spentHoursMin),
     spentHoursMax: toNumber(q.spentHoursMax),
-    viewTargets: toArray(q.viewTargets),
   };
 }
 
@@ -165,10 +161,6 @@ export function applyFilters(tickets: Ticket[], q: TicketQuery): Ticket[] {
     result = result.filter((t) => t.spentHours !== null && t.spentHours >= q.spentHoursMin!);
   if (q.spentHoursMax !== undefined)
     result = result.filter((t) => t.spentHours !== null && t.spentHours <= q.spentHoursMax!);
-
-  // 「切换人员」：受理人或发起人命中任一即可，跟缺陷页「本人可见」的口径保持一致
-  if (q.viewTargets?.length)
-    result = result.filter((t) => q.viewTargets!.includes(t.itHandler) || q.viewTargets!.includes(t.requester));
 
   if (q.cardKey) result = filterByCard(result, q.cardKey);
 

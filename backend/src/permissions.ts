@@ -8,13 +8,17 @@ import { store } from "./store";
  * 工单数据里推断（那样新同事在第一条缺陷落到自己头上之前会一直进不去，
  * 且管理员没有任何手动放行的入口），改为显式授权。
  *
+ * 刻意只收 actor 一个参数：角色一律以账号记录为准。之前还收一个 actorRole 并对
+ * "admin" 直接放行，但那个值是前端传上来的，等于谁传 actorRole=admin 谁就是管理员；
+ * 同理不传 actor 也不能当成"内部调用"放行——匿名请求应当直接拒绝。
+ *
  * 放在这里而不是 filter.ts：filter.ts 不能引用 store（store 反过来要用 filter 的
  * 范围函数），引进来就成了循环依赖。
  */
-export function canAccessDefects(actor?: string, actorRole?: string): boolean {
-  // 无操作人信息时不额外收敛，跟 scopeForActor 的处理保持一致（内部调用/未登录场景）
-  if (!actor) return true;
-  if (actorRole === "admin") return true;
+export function canAccessDefects(actor?: string): boolean {
+  if (!actor) return false;
   const account = store.accounts.find((a) => a.name === actor);
-  return !!account?.menuPermissions?.includes("defects");
+  if (!account) return false;
+  if (account.role === "admin") return true;
+  return !!account.menuPermissions?.includes("defects");
 }

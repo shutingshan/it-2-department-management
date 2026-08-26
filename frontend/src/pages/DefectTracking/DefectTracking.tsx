@@ -26,7 +26,6 @@ import { TICKET_STATUSES } from "../../api/types";
 import { Navigate, useOutletContext } from "react-router-dom";
 import { api } from "../../api/client";
 import { useAuthStore } from "../../store/auth";
-import { useViewTargetStore } from "../../store/viewTarget";
 import { EMPTY_TOKEN, useTickets } from "../TicketCenter/useTickets";
 import type { TicketFilters } from "../TicketCenter/useTickets";
 import dayjs from "dayjs";
@@ -143,14 +142,12 @@ function InlineBooleanSelect({
       placeholder="未填写"
       options={YES_NO_OPTIONS}
       value={value === null ? undefined : value ? "yes" : "no"}
+      // 只挂 onChange：清空时 antd 会先后触发 onChange(undefined) 和 onClear，
+      // 两个都提交就会发出两次 PATCH，第二次因为值没变而写下一条无意义的处理记录
       onChange={(v) => {
         const next = v === "yes" ? true : v === "no" ? false : null;
         setValue(next);
         commit(next);
-      }}
-      onClear={() => {
-        setValue(null);
-        commit(null);
       }}
     />
   );
@@ -212,8 +209,8 @@ function InlineCompletionStatusSelect({ ticket, onSaved }: { ticket: Ticket; onS
       placeholder="未填写"
       options={COMPLETION_OPTIONS}
       value={ticket.completionStatus || undefined}
+      // 同上：不再另挂 onClear，避免清空时提交两次
       onChange={(v) => commit(v ?? "")}
-      onClear={() => commit("")}
     />
   );
 }
@@ -294,8 +291,13 @@ function InlineSpentHoursInput({ ticket, onSaved }: { ticket: Ticket; onSaved: (
 // 缺陷跟进：工单中心的一个专属视角，固定只看"分类=缺陷"的工单，只展示同事关心的几列
 export default function DefectTracking() {
   const { refreshTick } = useOutletContext<{ refreshTick: number }>();
+  // 刻意不读全局的「切换人员」（useViewTargetStore）：那个状态是工单中心的
+  // "按IT受理人查看"，语义跟本页的"受理人或发起人"不是一回事；而且写入它的
+  // 「我负责的工单」按钮 IT受理人也能点，清空它的「切换人员」弹窗却只有管理员看得到——
+  // 共用就会让非管理员进到一个被静默过滤、自己又清不掉的看板。本页要按人筛，
+  // 用筛选栏里的发起人/受理人下拉即可
   const [extraFilters, setExtraFilters] = useState<
-    Omit<TicketFilters, "scope" | "sortField" | "sortOrder" | "viewTargets">
+    Omit<TicketFilters, "scope" | "sortField" | "sortOrder">
   >({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -319,17 +321,10 @@ export default function DefectTracking() {
     }
   }
 
-  // 头部「切换人员」选中的人：按受理人或发起人筛，跟本页可见范围口径一致
-  const { targets } = useViewTargetStore();
-  useEffect(() => {
-    setPage(1);
-  }, [targets]);
-
   // 显示哪些分类不写死在这里，由「取数与显示范围 → 缺陷跟进显示分类」配置决定（scope=defect）
   const filters: TicketFilters = {
     ...extraFilters,
     scope: "defect",
-    viewTargets: targets.length ? targets : undefined,
     sortField: "submittedAt",
     sortOrder,
   };

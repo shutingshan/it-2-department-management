@@ -198,16 +198,14 @@ function SwitchTargetButton() {
   // 弹窗里先勾选、点确定才生效，避免每勾一个就刷一次列表
   const [draft, setDraft] = useState<string[]>([]);
 
-  // 缺陷跟进页的候选要走缺陷口径（分类范围不同，且把发起人也算进来），
-  // 否则会列出一堆"选了之后缺陷列表是空的"的人
+  // 缺陷跟进页不读「切换人员」这个全局状态（见 DefectTracking 里的说明），
+  // 在那儿显示这个按钮只会让人以为点了有用，直接隐藏
   const isDefectPage = location.pathname.startsWith("/defects");
 
   // 取真实工单数据里出现过的 IT 受理人（后端已去重排序），而不是预置的部门人员目录——
   // 目录里有的人可能一条工单都没有，工单里的受理人也可能不在目录里
   async function loadUsers() {
-    const res = await api.get("/tickets/it-handlers", {
-      params: isDefectPage ? { scope: "defect" } : undefined,
-    });
+    const res = await api.get("/tickets/it-handlers");
     setUsers(res.data.data);
   }
 
@@ -220,7 +218,7 @@ function SwitchTargetButton() {
 
   // 只有管理员能跨受理人查看，其余角色的可见范围已按登录身份圈死，
   // 给他们这个按钮只会选完发现列表是空的
-  if (user?.role !== "admin") return null;
+  if (user?.role !== "admin" || isDefectPage) return null;
 
   return (
     <>
@@ -234,7 +232,7 @@ function SwitchTargetButton() {
         切换人员（{currentLabel}）
       </Button>
       <Modal
-        title={isDefectPage ? "切换查看对象（按受理人或发起人，可多选）" : "切换查看对象（可多选）"}
+        title="切换查看对象（可多选）"
         open={open}
         onCancel={() => setOpen(false)}
         afterOpenChange={(visible) => visible && loadUsers()}

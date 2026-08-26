@@ -37,15 +37,8 @@ router.get("/card-stats", (req, res) => {
 // 不用人员目录（store.users）是因为那份是预置的部门人员名单，跟真实工单里实际出现的
 // 受理人不一定对得上：目录里有的人可能一条工单都没有，工单里的人也可能不在目录里。
 // 同样走分类显示范围：否则下拉里会出现"选了之后列表一条都没有"的人
-// scope=defect 时改走缺陷口径：候选取自 defectVisibleTickets，且把「发起人」也算进来——
-// 缺陷页的「切换人员」是按「受理人或发起人」筛的，只列受理人的话，
-// 那些只提过缺陷、没受理过的人就永远选不到
-router.get("/it-handlers", (req, res) => {
-  const isDefect = (req.query as { scope?: string }).scope === "defect";
-  const source = isDefect ? store.defectVisibleTickets : store.visibleTickets;
-  const names = dedupe(
-    isDefect ? source.flatMap((t) => [t.itHandler, t.requester]) : source.map((t) => t.itHandler)
-  )
+router.get("/it-handlers", (_req, res) => {
+  const names = dedupe(store.visibleTickets.map((t) => t.itHandler))
     .filter((v) => v && v.trim())
     .sort();
   const data = names.map((name) => {
@@ -70,7 +63,7 @@ router.get("/", (req, res) => {
   const isDefect = scope === "defect";
   const base = isDefect ? store.defectVisibleTickets : store.visibleTickets;
   const scoped = isDefect
-    ? scopeForDefectActor(base, canAccessDefects(actor, actorRole))
+    ? scopeForDefectActor(base, canAccessDefects(actor))
     : scopeForActor(base, actor, actorRole);
   const filtered = applyFilters(scoped, q);
 
@@ -135,14 +128,61 @@ function normalizeFieldValue(key: string, raw: unknown): unknown {
   return dedupe(list.map((v) => String(v).trim()).filter(Boolean));
 }
 
+// 缺陷跟进那几个字段的取值校验。不校验的话前端传什么就存什么，
+// 比如 spentHours 传成 "abc" 会原样落库，之后既落不进工时区间筛选、
+// 又会以文本形式写进导出表格的数字列
+const TRI_STATE_FIELDS = ["hasTestCase", "testCaseSupplemented", "hasAutomatedTest"];
+const COMPLETION_VALUES = ["", "未开始", "进行中", "已完成"];
+
+/** 校验通过返回 null，否则返回给前端的错误文案 */
+function validateFieldValue(key: string, v: unknown): string | null {
+  if (TRI_STATE_FIELDS.includes(key)) {
+    return v === null || typeof v === "boolean" ? null : `${key} 只能是 true/false 或空`;
+  }
+  if (key === "completionStatus") {
+    return typeof v === "string" && COMPLETION_VALUES.includes(v)
+      ? null
+      : `completionStatus 只能是 ${COMPLETION_VALUES.filter(Boolean).join("/")} 或空`;
+  }
+  if (key === "automationPlanCompleteTime") {
+    if (v === null) return null;
+    return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)
+      ? null
+      : "automationPlanCompleteTime 只能是 YYYY-MM-DD 或空";
+  }
+  if (key === "spentHours") {
+    if (v === null) return null;
+    return typeof v === "number" && Number.isFinite(v) && v >= 0 ? null : "spentHours 只能是非负数字或空";
+  }
+  return null;
+}
+
 // 变更日志里数组按「、」展示，避免记成 "a,b" 这种不好读的形式；空数组记成 "-"；
-// 缺陷跟进的"是否"类字段是布尔值，记成 true/false/null 不好读，转成中文
+// 缺陷跟进的"是否"类字段是布尔值，记成 true/false/null 不好读，转成中文。
+// 注意：这只是"给人看"的文案，不能拿来判断值有没有变——见下面的 isSameValue
 function displayValue(v: unknown): string {
   if (Array.isArray(v)) return v.join("、") || "-";
   if (v === null || v === undefined || v === "") return "-";
   if (v === true) return "是";
   if (v === false) return "否";
   return String(v);
+}
+
+/**
+ * 判断字段值有没有变化。必须比较真实值而不是 displayValue 的结果：
+ * displayValue 把空值渲染成 "-"，而 "-" 本身也可能是用户真的输入的内容，
+ * 用文案比较的话，往空备注里填一个 "-"（或把内容为 "-" 的备注清空）
+ * 会被判定成"没变化"而被静默丢弃，接口还返回 200
+ */
+function isSameValue(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    const aa = Array.isArray(a) ? a : [];
+    const bb = Array.isArray(b) ? b : [];
+    return aa.length === bb.length && aa.every((v, i) => v === bb[i]);
+  }
+  // null 与 undefined 在这些字段上语义相同（都表示没填），其余一律严格比较
+  const norm = (v: unknown) => (v === undefined ? null : v);
+  return norm(a) === norm(b);
 }
 
 router.patch("/:id", (req, res) => {
@@ -166,7 +206,7 @@ router.patch("/:id", (req, res) => {
     }
     // 缺陷页「看得到就改得动」：可见范围是全有或全无，所以这里同样只判准入，
     // 通过的人可以改任意一条缺陷（含不是自己发起/受理的那些）
-    if (!canAccessDefects(actor, actorRole)) {
+    if (!canAccessDefects(actor)) {
       return res.status(403).json({ message: "无权限：该账号未被授权访问缺陷跟进" });
     }
   } else {
@@ -188,24 +228,33 @@ router.patch("/:id", (req, res) => {
       return res.status(403).json({ message: `无权限：${key} 仅管理员可编辑` });
     }
     const normalized = normalizeFieldValue(key, (fields as any)[key]);
-    const oldValue = displayValue((ticket as any)[key]);
-    const newValue = displayValue(normalized);
-    if (oldValue !== newValue) {
+    const invalid = validateFieldValue(key, normalized);
+    if (invalid) {
+      return res.status(400).json({ message: `字段校验失败：${invalid}` });
+    }
+    if (!isSameValue((ticket as any)[key], normalized)) {
       changeEntries.push({
         field: key,
-        oldValue,
-        newValue,
+        oldValue: displayValue((ticket as any)[key]),
+        newValue: displayValue(normalized),
         time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
         actor,
       });
       (ticket as any)[key] = normalized;
     }
   }
+
+  // 值没有任何变化时直接返回，不写处理记录——否则前端一次误触（比如清空一个本来
+  // 就是空的下拉）就会在工单里留下一条"更新字段：无变化"的噪声
+  if (changeEntries.length === 0) {
+    return res.json({ data: ticket });
+  }
+
   store.addChangeLog(ticket, changeEntries);
   ticket.processingNotes.push({
     time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
     actor,
-    content: `更新字段：${changeEntries.map((c) => c.field).join("、") || "无变化"}`,
+    content: `更新字段：${changeEntries.map((c) => c.field).join("、")}`,
   });
 
   // 需求方维护字段后，自动推送站内信给管理员角色
