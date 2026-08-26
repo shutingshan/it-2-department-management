@@ -11,6 +11,7 @@ import {
   Select,
   Space,
   Table,
+  Tree,
   message,
 } from "antd";
 import { CopyOutlined, ExportOutlined, SearchOutlined } from "@ant-design/icons";
@@ -62,6 +63,8 @@ const DEFAULT_COLUMN_ORDER = [
   "remark",
 ];
 const ORDER_STORAGE_KEY = "defect-column-order";
+// 左侧应用树的根节点 key。用不会跟真实归属应用撞车的值，避免某个应用刚好叫这个名字
+const ALL_APPS_KEY = "__all_apps__";
 
 // 存下来的顺序必须跟当前列集合完全一致才复用——否则版本升级加了新列时，
 // 老的本地顺序会让新列直接不显示
@@ -479,8 +482,41 @@ export default function DefectTracking() {
 
   const scrollX = columns.reduce((sum, c: any) => sum + (typeof c.width === "number" ? c.width : 120), 0);
 
+  // 左侧归属应用树。候选取自 facets.owningApps——后端算 facets 时会把"归属应用"
+  // 这一项自己排除掉，所以选中某个应用后，树里其余应用不会跟着消失
+  const treeData = [
+    {
+      title: "全部应用",
+      key: ALL_APPS_KEY,
+      children: facets.owningApps.map((app) => ({ title: app, key: app })),
+    },
+  ];
+  const selectedApp = extraFilters.owningApp?.[0];
+
   return (
-    <div>
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+      <Card size="small" style={{ width: 200, flex: "0 0 200px" }} styles={{ body: { padding: 8 } }}>
+        <Tree
+          treeData={treeData}
+          // 用受控的 expandedKeys 而不是 defaultExpandAll：facets 是异步加载的，
+          // 首次渲染时树只有根节点，defaultExpandAll 会把"已展开"定格在那一刻，
+          // 等应用列表到了也不会再展开
+          expandedKeys={[ALL_APPS_KEY]}
+          onExpand={() => {
+            /* 只有一层，不允许收起根节点 */
+          }}
+          blockNode
+          selectedKeys={[selectedApp ?? ALL_APPS_KEY]}
+          onSelect={(keys) => {
+            // 点已选中的节点时 antd 会回传空数组，这种情况保持原选择不动
+            const key = keys[0] as string | undefined;
+            if (!key) return;
+            setFilter("owningApp", key === ALL_APPS_KEY ? undefined : [key]);
+          }}
+        />
+      </Card>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
       <Card size="small" style={{ marginBottom: 12 }}>
         <Space wrap size={[6, 6]}>
           <Input
@@ -504,18 +540,7 @@ export default function DefectTracking() {
             onChange={(v) => setFilter("category", v.length ? v : undefined)}
             maxTagCount={1}
           />
-          <Select
-            size="small"
-            mode="multiple"
-            allowClear
-            placeholder="归属应用"
-            style={{ minWidth: 140 }}
-            showSearch
-            options={facets.owningApps.map((v) => ({ value: v, label: v }))}
-            value={extraFilters.owningApp}
-            onChange={(v) => setFilter("owningApp", v.length ? v : undefined)}
-            maxTagCount={1}
-          />
+          {/* 归属应用改由左侧树选择，这里不再放下拉，避免两个入口互相覆盖 */}
           <Select
             size="small"
             mode="multiple"
@@ -731,6 +756,7 @@ export default function DefectTracking() {
           />
         </div>
       </Card>
+      </div>
     </div>
   );
 }

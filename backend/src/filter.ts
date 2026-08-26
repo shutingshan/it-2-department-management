@@ -228,17 +228,27 @@ export function scopeForActor(tickets: Ticket[], actor?: string, actorRole?: str
 }
 
 /**
- * 缺陷跟进页的可见范围：数据对所有登录用户公开，不按身份收敛。
+ * 能否进入缺陷跟进：只要在缺陷范围内当过发起人或受理人，就算参与了缺陷工作；
+ * 管理员不受限。这是一道"准入"判断，不是逐行过滤——判定通过就能看全部缺陷。
  *
- * 跟工单中心（受理人只看自己受理的、需求方只看自己发起或关注的）刻意不同——
- * 缺陷跟进是一块全员共用的看板，谁都得看得到全量缺陷才能协作跟进。
+ * 之所以是全有或全无：缺陷跟进是参与者共用的协作看板，只看自己那几条没法交叉跟进；
+ * 但对完全没参与过缺陷的人则整体关闭，不把全量缺陷暴露出去。
+ */
+export function canAccessDefects(tickets: Ticket[], actor?: string, actorRole?: string): boolean {
+  if (!actor || actorRole === "admin") return true;
+  return tickets.some((t) => t.itHandler === actor || t.requester === actor);
+}
+
+/**
+ * 缺陷跟进页的可见范围：通过准入的人看全部，没通过的一条也看不到。
+ *
+ * 跟工单中心（受理人只看自己受理的、需求方只看自己发起或关注的）刻意不同。
  * 想只看跟自己相关的，用头部「切换人员」或筛选栏的发起人/受理人下拉即可。
  *
- * 保留这个函数而不是直接省掉调用，是为了给"缺陷页的可见范围"留一个唯一的落点：
- * 以后要收窄，改这里一处，列表/导出/落地页判断会一起生效。
+ * 列表/导出/登录落地页判断都走这里，口径天然一致。
  */
-export function scopeForDefectActor(tickets: Ticket[], _actor?: string, _actorRole?: string): Ticket[] {
-  return tickets;
+export function scopeForDefectActor(tickets: Ticket[], actor?: string, actorRole?: string): Ticket[] {
+  return canAccessDefects(tickets, actor, actorRole) ? tickets : [];
 }
 
 export function canViewTicket(ticket: Ticket, actor?: string, actorRole?: string): boolean {

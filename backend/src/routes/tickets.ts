@@ -3,6 +3,7 @@ import dayjs from "dayjs";
 import { backupStoreFile, store } from "../store";
 import {
   applyFilters,
+  canAccessDefects,
   canViewTicket,
   parseQuery,
   scopeForActor,
@@ -157,12 +158,16 @@ router.patch("/:id", (req, res) => {
   if (!actor) return res.status(400).json({ message: "缺少操作人信息，无法提交" });
 
   if (view === "defect") {
-    // 缺陷跟进页：数据对所有登录用户公开，且「看得到就改得动」，故这里不再按人收敛。
-    // 但仍必须确认工单确实落在缺陷范围内——否则客户端只要带上 view=defect，
+    // 工单必须确实落在缺陷范围内——否则客户端只要带上 view=defect，
     // 就能绕过下面工单中心那套更严的编辑权限去改别的分类的工单
     const inDefectScope = store.defectVisibleTickets.some((t) => t.id === ticket.id);
     if (!inDefectScope) {
       return res.status(403).json({ message: "无权限：该工单不在缺陷跟进范围内" });
+    }
+    // 缺陷页「看得到就改得动」：可见范围是全有或全无，所以这里同样只判准入，
+    // 通过的人可以改任意一条缺陷（含不是自己发起/受理的那些）
+    if (!canAccessDefects(store.defectVisibleTickets, actor, actorRole)) {
+      return res.status(403).json({ message: "无权限：仅缺陷的发起人或受理人可编辑缺陷跟进数据" });
     }
   } else {
     // IT 受理人仅可编辑自己负责的数据；需求方仅可编辑发起人或关注人包含本人的数据
