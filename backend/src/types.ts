@@ -41,6 +41,14 @@ export const SYNC_PERMISSIONS: { key: SyncPermission; label: string }[] = [
   { key: "tapd-login", label: "TAPD扫码登录" },
 ];
 
+// 可按账号单独授权的菜单。缺陷跟进是一块跨部门共用的看板，进去就能看到并编辑
+// 全量缺陷，谁能进由管理员在账号配置里直接勾选，不从工单数据里推断
+export type MenuPermission = "defects";
+
+export const MENU_PERMISSIONS: { key: MenuPermission; label: string }[] = [
+  { key: "defects", label: "缺陷跟进" },
+];
+
 // 范围配置项。两处用途互相独立，配置为空都表示"不限制"（避免升级后老部署行为突变）：
 // - 受理人范围：「获取新工单」「全量获取」时只导入这些受理人的工单
 // - 分类范围：工单中心的显示范围，列表、统计卡片、导出三者口径一致
@@ -59,6 +67,9 @@ export interface Account {
   // "更新工单"下拉里该账号被授权的操作；管理员不受此字段限制（始终全部可用）。
   // 未配置（undefined）按"一个都没授权"处理——这类操作影响全量数据，默认不给更安全
   syncPermissions?: SyncPermission[];
+  // 该账号被授权的菜单；管理员不受此字段限制（始终全部可用）。
+  // 未配置（undefined）按"一个都没授权"处理，跟 syncPermissions 一致
+  menuPermissions?: MenuPermission[];
 }
 
 // 状态：来自当曲云/TAPD原始状态

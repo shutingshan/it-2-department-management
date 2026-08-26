@@ -31,7 +31,6 @@ const { Sider, Header, Content } = Layout;
 const BASE_MENU_ITEMS = [
   { key: "/home", icon: <HomeOutlined />, label: "首页" },
   { key: "/tickets", icon: <AppstoreOutlined />, label: "工单中心" },
-  { key: "/defects", icon: <BugOutlined />, label: "缺陷跟进" },
   { key: "/dev-hours", icon: <BarChartOutlined />, label: "开发工时统计" },
   { key: "/departments", icon: <ClusterOutlined />, label: "部门统计" },
 ];
@@ -58,17 +57,28 @@ export default function AppShell() {
     return <Navigate to="/login" replace />;
   }
 
+  // 缺陷跟进按账号授权（账号配置里的「菜单权限」），管理员始终可见。
+  // 紧跟在工单中心后面，跟原来的位置保持一致
+  const canSeeDefects = user.role === "admin" || (user.menuPermissions ?? []).includes("defects");
+  const baseItems = canSeeDefects
+    ? [
+        ...BASE_MENU_ITEMS.slice(0, 2),
+        { key: "/defects", icon: <BugOutlined />, label: "缺陷跟进" },
+        ...BASE_MENU_ITEMS.slice(2),
+      ]
+    : BASE_MENU_ITEMS;
+
   // "账号配置"/"变更日志"/"部门配置"仅管理员可见
   const MENU_ITEMS =
     user.role === "admin"
       ? [
-          ...BASE_MENU_ITEMS,
+          ...baseItems,
           { key: "/dept-config", icon: <ApartmentOutlined />, label: "部门配置" },
           { key: "/scope-config", icon: <FilterOutlined />, label: "取数与显示范围" },
           { key: "/account-config", icon: <SettingOutlined />, label: "账号配置" },
           { key: "/change-logs", icon: <HistoryOutlined />, label: "变更日志" },
         ]
-      : BASE_MENU_ITEMS;
+      : baseItems;
 
   function handleLogout() {
     Modal.confirm({

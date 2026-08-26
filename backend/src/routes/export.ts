@@ -4,6 +4,7 @@ import { ZipArchive } from "archiver";
 import dayjs from "dayjs";
 import { store } from "../store";
 import { applyFilters, parseQuery, scopeForActor, scopeForDefectActor } from "../filter";
+import { canAccessDefects } from "../permissions";
 import { hoursDeviation, Ticket } from "../types";
 import { dedupe, stripCurrentIterationTag } from "../mapping";
 
@@ -156,11 +157,17 @@ router.post("/", async (req, res) => {
   // view=defect：缺陷跟进页的导出，分类范围与可见范围都换成缺陷那套，导出列也换成缺陷列表的列
   const isDefect = view === "defect";
 
+  // 未授权时明确报权限错误。否则会走到下面"结果为空"的分支，
+  // 提示成"当前筛选条件下没有可导出的数据"，让人以为是筛选问题
+  if (isDefect && !canAccessDefects(actor, actorRole)) {
+    return res.status(403).json({ message: "无权限：该账号未被授权访问缺陷跟进" });
+  }
+
   // 导出范围必须跟列表一致：IT受理人只导自己负责的、需求方只导跟自己相关的，
   // 否则"全量导出"会把这些角色在列表里根本看不到的工单一并导出去
   // 导出范围跟列表保持一致：先按分类显示范围收敛，再按登录身份圈定
   const visible = isDefect
-    ? scopeForDefectActor(store.defectVisibleTickets, actor, actorRole)
+    ? scopeForDefectActor(store.defectVisibleTickets, canAccessDefects(actor, actorRole))
     : scopeForActor(store.visibleTickets, actor, actorRole);
   const stamp = dayjs().format("YYYYMMDD_HHmm");
   const docName = isDefect ? "IT二部缺陷数据" : "IT二部工单数据";

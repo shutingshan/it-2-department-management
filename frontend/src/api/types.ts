@@ -12,10 +12,19 @@ export interface User {
   avatarColor: string;
   // 该账号被授权的"更新工单"操作；管理员由后端直接返回全部
   syncPermissions?: SyncPermission[];
+  // 该账号被授权的菜单；管理员由后端直接返回全部
+  menuPermissions?: MenuPermission[];
 }
 
 // "更新工单"下拉里可以按账号单独授权的操作（跟后端 types.ts 的 SYNC_PERMISSIONS 一一对应）
 export type SyncPermission = "fetch-incremental" | "fetch-full" | "update" | "tapd" | "tapd-login";
+
+// 可按账号单独授权的菜单（跟后端 types.ts 的 MENU_PERMISSIONS 一一对应）
+export type MenuPermission = "defects";
+
+export const MENU_PERMISSIONS: { key: MenuPermission; label: string }[] = [
+  { key: "defects", label: "缺陷跟进" },
+];
 
 export const SYNC_PERMISSIONS: { key: SyncPermission; label: string }[] = [
   { key: "fetch-incremental", label: "获取新工单" },
@@ -50,6 +59,7 @@ export interface Account {
   role: AccountRole;
   locked?: boolean;
   syncPermissions?: SyncPermission[];
+  menuPermissions?: MenuPermission[];
 }
 
 export interface Department {

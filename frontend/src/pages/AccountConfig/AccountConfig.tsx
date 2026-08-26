@@ -3,8 +3,8 @@ import { Navigate } from "react-router-dom";
 import { Button, Checkbox, Form, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from "antd";
 import { LockOutlined, PlusOutlined } from "@ant-design/icons";
 import { api } from "../../api/client";
-import type { Account, AccountRole, SyncPermission, User } from "../../api/types";
-import { ROLE_LABELS, SYNC_PERMISSIONS } from "../../api/types";
+import type { Account, AccountRole, MenuPermission, SyncPermission, User } from "../../api/types";
+import { MENU_PERMISSIONS, ROLE_LABELS, SYNC_PERMISSIONS } from "../../api/types";
 import { useAuthStore } from "../../store/auth";
 import "./AccountConfig.css";
 
@@ -22,6 +22,7 @@ export default function AccountConfig() {
     userId: string;
     role: AccountRole;
     syncPermissions?: SyncPermission[];
+    menuPermissions?: MenuPermission[];
   }>();
   // 角色决定要不要展示权限勾选（管理员天然全量），须在 form 声明之后取
   const selectedRole = Form.useWatch("role", form);
@@ -56,6 +57,7 @@ export default function AccountConfig() {
       userId: account.userId,
       role: account.role,
       syncPermissions: account.syncPermissions ?? [],
+      menuPermissions: account.menuPermissions ?? [],
     });
     setModalOpen(true);
   }
@@ -187,6 +189,27 @@ export default function AccountConfig() {
               }
             />
           </Form.Item>
+          {selectedRole === "admin" ? (
+            <Form.Item label="菜单权限">
+              <Typography.Text type="secondary">管理员默认拥有全部菜单，无需单独勾选。</Typography.Text>
+            </Form.Item>
+          ) : (
+            <Form.Item
+              name="menuPermissions"
+              label="菜单权限"
+              extra="不勾选时，该账号的左侧导航里不会出现这些菜单，直接访问也看不到数据"
+            >
+              <Checkbox.Group>
+                <Space direction="vertical" size={4}>
+                  {MENU_PERMISSIONS.map((p) => (
+                    <Checkbox key={p.key} value={p.key}>
+                      {p.label}
+                    </Checkbox>
+                  ))}
+                </Space>
+              </Checkbox.Group>
+            </Form.Item>
+          )}
           {selectedRole === "admin" ? (
             <Form.Item label={'"更新工单"操作权限'}>
               <Typography.Text type="secondary">管理员默认拥有全部操作权限，无需单独勾选。</Typography.Text>

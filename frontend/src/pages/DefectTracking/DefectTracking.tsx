@@ -23,7 +23,7 @@ import { arrayMove, horizontalListSortingStrategy, SortableContext } from "@dnd-
 import DraggableHeaderCell from "../TicketCenter/DraggableHeaderCell";
 import type { Ticket } from "../../api/types";
 import { TICKET_STATUSES } from "../../api/types";
-import { useOutletContext } from "react-router-dom";
+import { Navigate, useOutletContext } from "react-router-dom";
 import { api } from "../../api/client";
 import { useAuthStore } from "../../store/auth";
 import { useViewTargetStore } from "../../store/viewTarget";
@@ -336,6 +336,10 @@ export default function DefectTracking() {
 
   const { data, total, facets, loading, reload } = useTickets(filters, page, pageSize, refreshTick);
 
+  // 未授权的账号即使手输地址也进不来（后端同样会挡，这里只是免得看到一张空表）。
+  // 放在所有 Hook 之后再早退，否则授权状态一变就会少调用 Hook 让 React 直接报错
+  const allowed = user?.role === "admin" || (user?.menuPermissions ?? []).includes("defects");
+
   function setFilter<K extends keyof typeof extraFilters>(key: K, value: (typeof extraFilters)[K]) {
     setExtraFilters((f) => ({ ...f, [key]: value }));
     setPage(1);
@@ -492,6 +496,10 @@ export default function DefectTracking() {
     },
   ];
   const selectedApp = extraFilters.owningApp?.[0];
+
+  if (!allowed) {
+    return <Navigate to="/tickets" replace />;
+  }
 
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>

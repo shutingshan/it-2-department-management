@@ -3,13 +3,13 @@ import dayjs from "dayjs";
 import { backupStoreFile, store } from "../store";
 import {
   applyFilters,
-  canAccessDefects,
   canViewTicket,
   parseQuery,
   scopeForActor,
   scopeForDefectActor,
   TicketQuery,
 } from "../filter";
+import { canAccessDefects } from "../permissions";
 import { dedupe, stripCurrentIterationTag } from "../mapping";
 import { computeCardStats } from "../cards";
 import { ChangeLogEntry } from "../types";
@@ -66,11 +66,11 @@ router.get("/", (req, res) => {
   const q = parseQuery(req.query as Record<string, unknown>);
   const { actor, actorRole, scope } = req.query as { actor?: string; actorRole?: string; scope?: string };
   // scope=defect：缺陷跟进页，分类范围走 defectCategories 而不是工单中心那份，
-  // 可见范围也换成「受理人或发起人是本人」（见 scopeForDefectActor）
+  // 可见范围换成缺陷那套：按账号授权准入，通过则看全部（见 permissions.canAccessDefects）
   const isDefect = scope === "defect";
   const base = isDefect ? store.defectVisibleTickets : store.visibleTickets;
   const scoped = isDefect
-    ? scopeForDefectActor(base, actor, actorRole)
+    ? scopeForDefectActor(base, canAccessDefects(actor, actorRole))
     : scopeForActor(base, actor, actorRole);
   const filtered = applyFilters(scoped, q);
 
@@ -166,8 +166,8 @@ router.patch("/:id", (req, res) => {
     }
     // 缺陷页「看得到就改得动」：可见范围是全有或全无，所以这里同样只判准入，
     // 通过的人可以改任意一条缺陷（含不是自己发起/受理的那些）
-    if (!canAccessDefects(store.defectVisibleTickets, actor, actorRole)) {
-      return res.status(403).json({ message: "无权限：仅缺陷的发起人或受理人可编辑缺陷跟进数据" });
+    if (!canAccessDefects(actor, actorRole)) {
+      return res.status(403).json({ message: "无权限：该账号未被授权访问缺陷跟进" });
     }
   } else {
     // IT 受理人仅可编辑自己负责的数据；需求方仅可编辑发起人或关注人包含本人的数据

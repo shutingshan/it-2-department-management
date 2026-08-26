@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { store } from "../store";
 import { scopeForActor, scopeForDefectActor } from "../filter";
-import { Account, SYNC_PERMISSIONS } from "../types";
+import { canAccessDefects } from "../permissions";
+import { Account, MENU_PERMISSIONS, SYNC_PERMISSIONS } from "../types";
 
 const router = Router();
 
@@ -15,7 +16,8 @@ const router = Router();
 function resolveLandingPage(user: { name: string; role: string }): string {
   if (user.role === "admin") return "/tickets";
   if (scopeForActor(store.visibleTickets, user.name, user.role).length > 0) return "/tickets";
-  if (scopeForDefectActor(store.defectVisibleTickets, user.name, user.role).length > 0) return "/defects";
+  const defects = scopeForDefectActor(store.defectVisibleTickets, canAccessDefects(user.name, user.role));
+  if (defects.length > 0) return "/defects";
   return "/tickets";
 }
 
@@ -31,6 +33,9 @@ function toSessionUser(account: Account) {
     // 管理员始终拥有全部同步操作权限，不依赖逐个勾选
     syncPermissions:
       account.role === "admin" ? SYNC_PERMISSIONS.map((p) => p.key) : account.syncPermissions ?? [],
+    // 菜单权限同理：管理员全部可见
+    menuPermissions:
+      account.role === "admin" ? MENU_PERMISSIONS.map((p) => p.key) : account.menuPermissions ?? [],
   };
 }
 
