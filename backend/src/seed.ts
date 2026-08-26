@@ -318,6 +318,12 @@ export function genTicket(year: number, seqInYear: number, submittedAt: dayjs.Da
     slaFlag: null,
     tapdErrorNote: null,
     dangquyunErrorNote: null,
+    hasTestCase: null,
+    testCaseSupplemented: null,
+    hasAutomatedTest: null,
+    automationPlanCompleteTime: null,
+    completionStatus: "",
+    spentHours: null,
   };
 }
 

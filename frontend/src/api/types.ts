@@ -175,6 +175,13 @@ export interface Ticket {
   slaFlag: string | null;
   tapdErrorNote: SyncErrorNote | null;
   dangquyunErrorNote: SyncErrorNote | null;
+  // 缺陷跟进页面维护的字段
+  hasTestCase: boolean | null;
+  testCaseSupplemented: boolean | null;
+  hasAutomatedTest: boolean | null;
+  automationPlanCompleteTime: string | null;
+  completionStatus: "" | "未开始" | "进行中" | "已完成";
+  spentHours: number | null;
 }
 
 export interface InSiteMessage {

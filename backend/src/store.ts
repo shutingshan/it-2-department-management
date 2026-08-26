@@ -85,6 +85,13 @@ class Store {
       this.tickets = (parsed.tickets ?? []).map((t) => ({
         ...t,
         urgent: typeof t.urgent === "string" ? t.urgent : t.urgent ? "紧急" : "",
+        // 缺陷跟进字段是后加的，旧 store.json 里没有这几个键，兜底成"未填写"
+        hasTestCase: t.hasTestCase ?? null,
+        testCaseSupplemented: t.testCaseSupplemented ?? null,
+        hasAutomatedTest: t.hasAutomatedTest ?? null,
+        automationPlanCompleteTime: t.automationPlanCompleteTime ?? null,
+        completionStatus: t.completionStatus ?? "",
+        spentHours: t.spentHours ?? null,
       }));
       this.messages = parsed.messages ?? [];
       this.logs = parsed.logs ?? [];

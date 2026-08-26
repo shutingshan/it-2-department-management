@@ -10,6 +10,12 @@ const FIELD_LABELS: Record<string, string> = {
   stage: "工单阶段",
   status: "状态",
   itHandler: "IT受理人",
+  hasTestCase: "是否有测试用例",
+  testCaseSupplemented: "是否已补充测试用例",
+  hasAutomatedTest: "是否做自动化测试",
+  automationPlanCompleteTime: "自动化计划完成时间",
+  completionStatus: "完成情况",
+  spentHours: "花费工时",
 };
 
 // 数据变更：谁在什么时候变更了工单的某个字段（汇总自各工单的变更记录）

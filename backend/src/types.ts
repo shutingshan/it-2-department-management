@@ -181,6 +181,13 @@ export interface Ticket {
   slaFlag: string | null;
   tapdErrorNote: SyncErrorNote | null; // 获取TAPD信息异常时反填
   dangquyunErrorNote: SyncErrorNote | null; // 同步当曲云工单信息异常时反填
+  // 以下为「缺陷跟进」页面维护的字段，跟当曲云/TAPD 同步无关，纯人工填写
+  hasTestCase: boolean | null; // 是否有测试用例
+  testCaseSupplemented: boolean | null; // 是否已补充测试用例
+  hasAutomatedTest: boolean | null; // 是否做自动化测试
+  automationPlanCompleteTime: string | null; // 自动化计划完成时间
+  completionStatus: "" | "未开始" | "进行中" | "已完成"; // 完成情况
+  spentHours: number | null; // 花费工时
 }
 
 export interface InSiteMessage {

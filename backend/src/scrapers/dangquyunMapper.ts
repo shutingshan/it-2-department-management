@@ -115,5 +115,12 @@ export function mapScrapedRowToTicket(row: ScrapedRow, existing?: Ticket): Ticke
     slaFlag: emptyToNull(row["SLA"]),
     tapdErrorNote: existing?.tapdErrorNote ?? null,
     dangquyunErrorNote: existing?.dangquyunErrorNote ?? null,
+    // 缺陷跟进字段纯人工维护，同步时原样保留，新工单默认空
+    hasTestCase: existing?.hasTestCase ?? null,
+    testCaseSupplemented: existing?.testCaseSupplemented ?? null,
+    hasAutomatedTest: existing?.hasAutomatedTest ?? null,
+    automationPlanCompleteTime: existing?.automationPlanCompleteTime ?? null,
+    completionStatus: existing?.completionStatus ?? "",
+    spentHours: existing?.spentHours ?? null,
   };
 }

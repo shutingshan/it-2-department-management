@@ -88,8 +88,18 @@ router.get("/:id", (req, res) => {
   res.json({ data: ticket });
 });
 
-// 紧急、备注两个字段所有角色均可实时编辑，其余字段暂不支持通用编辑
-const EDITABLE_FIELDS = ["urgent", "remark", "monthlyPlan"] as const;
+// 紧急、备注两个字段所有角色均可实时编辑；缺陷跟进的几个字段同理，均为人工维护、不受同步影响
+const EDITABLE_FIELDS = [
+  "urgent",
+  "remark",
+  "monthlyPlan",
+  "hasTestCase",
+  "testCaseSupplemented",
+  "hasAutomatedTest",
+  "automationPlanCompleteTime",
+  "completionStatus",
+  "spentHours",
+] as const;
 // 仅管理员可编辑的字段。月度计划是从 TAPD 同步过来的字段，放开给管理员是为了
 // 在 TAPD 还没维护好时能先手工补上；它仍会被下一次「获取TAPD信息」按 TAPD 的值覆盖
 const ADMIN_ONLY_FIELDS: string[] = ["monthlyPlan"];
@@ -102,9 +112,14 @@ function normalizeFieldValue(key: string, raw: unknown): unknown {
   return dedupe(list.map((v) => String(v).trim()).filter(Boolean));
 }
 
-// 变更日志里数组按「、」展示，避免记成 "a,b" 这种不好读的形式；空数组记成 "-"
+// 变更日志里数组按「、」展示，避免记成 "a,b" 这种不好读的形式；空数组记成 "-"；
+// 缺陷跟进的"是否"类字段是布尔值，记成 true/false/null 不好读，转成中文
 function displayValue(v: unknown): string {
-  return Array.isArray(v) ? v.join("、") || "-" : String(v);
+  if (Array.isArray(v)) return v.join("、") || "-";
+  if (v === null || v === undefined || v === "") return "-";
+  if (v === true) return "是";
+  if (v === false) return "否";
+  return String(v);
 }
 
 router.patch("/:id", (req, res) => {
