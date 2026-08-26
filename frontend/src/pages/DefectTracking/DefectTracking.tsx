@@ -542,18 +542,22 @@ export default function DefectTracking() {
   // - 没配则回落到原始形态：每个归属应用各占一个节点，候选取自 facets.owningApps
   //   （后端算 facets 时会把"归属应用"这一项自己排除掉，所以选中某个应用后，
   //   树里其余应用不会跟着消失）
-  const treeData = useMemo(
-    () => [
+  const treeData = useMemo(() => {
+    // 已被某个分组收编的应用不再单独出现，其余的（含新上线、还没来得及配进分组的）
+    // 按原样各挂一个节点，保证任何应用都能在树上直接点到，不会只能从「全部」里翻
+    const grouped = new Set(treeNodes.flatMap((n) => n.apps));
+    const ungrouped = facets.owningApps.filter((app) => !grouped.has(app));
+    return [
       {
         title: "全部",
         key: ALL_APPS_KEY,
-        children: treeNodes.length
-          ? treeNodes.map((n) => ({ title: n.name, key: n.id }))
-          : facets.owningApps.map((app) => ({ title: app, key: app })),
+        children: [
+          ...treeNodes.map((n) => ({ title: n.name, key: n.id })),
+          ...ungrouped.map((app) => ({ title: app, key: app })),
+        ],
       },
-    ],
-    [treeNodes, facets.owningApps]
-  );
+    ];
+  }, [treeNodes, facets.owningApps]);
 
   // 点某个节点时要把它包含的应用整组塞进筛选条件；反过来渲染选中态时也要从
   // 当前筛选条件认回是哪个节点，所以这里按 key 建一张映射
