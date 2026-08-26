@@ -51,6 +51,13 @@ export type ScopeKind =
   | "excludedStatuses"
   | "verifyCodes";
 
+// 缺陷跟进左侧应用树的分组节点（跟后端 types.ts 的 DefectTreeNode 对应）
+export interface DefectTreeNode {
+  id: string;
+  name: string;
+  apps: string[];
+}
+
 export interface Account {
   id: string;
   userId: string;

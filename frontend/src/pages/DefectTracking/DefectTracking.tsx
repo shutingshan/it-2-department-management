@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Card,
@@ -21,7 +22,7 @@ import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } f
 import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
 import { arrayMove, horizontalListSortingStrategy, SortableContext } from "@dnd-kit/sortable";
 import DraggableHeaderCell from "../TicketCenter/DraggableHeaderCell";
-import type { Ticket } from "../../api/types";
+import type { DefectTreeNode, Ticket } from "../../api/types";
 import { TICKET_STATUSES } from "../../api/types";
 import { Navigate, useOutletContext } from "react-router-dom";
 import { api } from "../../api/client";
@@ -29,6 +30,7 @@ import { useAuthStore } from "../../store/auth";
 import { EMPTY_TOKEN, useTickets } from "../TicketCenter/useTickets";
 import type { TicketFilters } from "../TicketCenter/useTickets";
 import dayjs from "dayjs";
+import "./DefectTracking.css";
 
 const { RangePicker } = DatePicker;
 
@@ -62,6 +64,8 @@ const DEFAULT_COLUMN_ORDER = [
   "remark",
 ];
 const ORDER_STORAGE_KEY = "defect-column-order";
+// 列宽同样是个人配置，跟列顺序一样存在本机 localStorage，不随账号同步
+const WIDTH_STORAGE_KEY = "defect-column-widths";
 // 左侧应用树的根节点 key。用不会跟真实归属应用撞车的值，避免某个应用刚好叫这个名字
 const ALL_APPS_KEY = "__all_apps__";
 
@@ -81,6 +85,17 @@ function loadColumnOrder(): string[] {
     // 忽略损坏的本地存储数据
   }
   return DEFAULT_COLUMN_ORDER;
+}
+
+// 用户手动拖过的列宽，按列 key 存；没拖过的列不在这里，用 columnDefs 里的默认宽度
+function loadColumnWidths(): Record<string, number> {
+  try {
+    const saved = JSON.parse(localStorage.getItem(WIDTH_STORAGE_KEY) ?? "null");
+    if (saved && typeof saved === "object" && !Array.isArray(saved)) return saved;
+  } catch {
+    // 忽略损坏的本地存储数据
+  }
+  return {};
 }
 
 // 标题/内容较长，单元格省略号截断，点击后弹出完整内容
@@ -307,12 +322,46 @@ export default function DefectTracking() {
   // 提交时间排序，默认倒序（最新的在前）
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [columnOrder, setColumnOrder] = useState<string[]>(loadColumnOrder);
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(loadColumnWidths);
+  const [treeNodes, setTreeNodes] = useState<DefectTreeNode[]>([]);
+  const [selectedTreeKey, setSelectedTreeKey] = useState<string>(ALL_APPS_KEY);
+
+  // 表格高度不能写死：筛选栏选中条件多时会换行，高度是变的。这里实测表格容器剩余高度，
+  // 减掉表头后作为表体的滚动高度，保证列表撑满一屏、且横向滚动条稳定停在屏幕底部
+  const tableWrapRef = useRef<HTMLDivElement>(null);
+  const [tableScrollY, setTableScrollY] = useState(360);
+  useEffect(() => {
+    const el = tableWrapRef.current;
+    if (!el) return;
+    const update = () => {
+      const headerHeight =
+        el.querySelector<HTMLElement>(".ant-table-thead")?.getBoundingClientRect().height ?? 39;
+      setTableScrollY(Math.max(160, Math.round(el.clientHeight - headerHeight)));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // 左侧树的分组配置。未配置时回落到"一个归属应用一个节点"的原始形态
+  useEffect(() => {
+    api.get("/defect-tree").then((res) => setTreeNodes(res.data.data)).catch(() => setTreeNodes([]));
+  }, []);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   useEffect(() => {
     localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(columnOrder));
   }, [columnOrder]);
+
+  useEffect(() => {
+    localStorage.setItem(WIDTH_STORAGE_KEY, JSON.stringify(columnWidths));
+  }, [columnWidths]);
+
+  function handleColumnResize(key: string, width: number) {
+    setColumnWidths((w) => ({ ...w, [key]: width }));
+  }
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
@@ -469,36 +518,58 @@ export default function DefectTracking() {
       ),
     },
     ...columnOrder.map((key) => ({ ...columnDefs[key], key })),
-  ].map((col: any) => ({
-    ...col,
-    onHeaderCell: (column: any) => ({
-      // 只有中间这些列可拖拽调序，编号列不给 columnKey 即不可拖
-      columnKey: column.key === "code" ? undefined : column.key,
-      resizeKey: column.key,
-      width: column.width,
-    }),
-  })) as ColumnsType<Ticket>;
+  ].map((col: any) => {
+    // 用户拖过的宽度优先，没拖过的用列定义里的默认宽度
+    const width = columnWidths[col.key] ?? col.width;
+    return {
+      ...col,
+      width,
+      onHeaderCell: (column: any) => ({
+        // 只有中间这些列可拖拽调序，编号列不给 columnKey 即不可拖；
+        // 列宽拖拽则所有列都开放，两者是独立的两回事
+        columnKey: column.key === "code" ? undefined : column.key,
+        resizeKey: column.key,
+        width,
+        onResize: handleColumnResize,
+      }),
+    };
+  }) as ColumnsType<Ticket>;
 
   const scrollX = columns.reduce((sum, c: any) => sum + (typeof c.width === "number" ? c.width : 120), 0);
 
-  // 左侧归属应用树。候选取自 facets.owningApps——后端算 facets 时会把"归属应用"
-  // 这一项自己排除掉，所以选中某个应用后，树里其余应用不会跟着消失
-  const treeData = [
-    {
-      title: "全部应用",
-      key: ALL_APPS_KEY,
-      children: facets.owningApps.map((app) => ({ title: app, key: app })),
-    },
-  ];
-  const selectedApp = extraFilters.owningApp?.[0];
+  // 左侧归属应用树。
+  // - 配了分组（defect-tree）就按分组渲染：一个节点对应一组归属应用
+  // - 没配则回落到原始形态：每个归属应用各占一个节点，候选取自 facets.owningApps
+  //   （后端算 facets 时会把"归属应用"这一项自己排除掉，所以选中某个应用后，
+  //   树里其余应用不会跟着消失）
+  const treeData = useMemo(
+    () => [
+      {
+        title: "全部",
+        key: ALL_APPS_KEY,
+        children: treeNodes.length
+          ? treeNodes.map((n) => ({ title: n.name, key: n.id }))
+          : facets.owningApps.map((app) => ({ title: app, key: app })),
+      },
+    ],
+    [treeNodes, facets.owningApps]
+  );
+
+  // 点某个节点时要把它包含的应用整组塞进筛选条件；反过来渲染选中态时也要从
+  // 当前筛选条件认回是哪个节点，所以这里按 key 建一张映射
+  const appsOfNode = (key: string): string[] | undefined => {
+    if (key === ALL_APPS_KEY) return undefined;
+    const node = treeNodes.find((n) => n.id === key);
+    return node ? node.apps : [key];
+  };
 
   if (!allowed) {
     return <Navigate to="/tickets" replace />;
   }
 
   return (
-    <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-      <Card size="small" style={{ width: 200, flex: "0 0 200px" }} styles={{ body: { padding: 8 } }}>
+    <div className="defect-page">
+      <Card size="small" className="defect-tree-card" styles={{ body: { padding: 8 } }}>
         <Tree
           treeData={treeData}
           // 用受控的 expandedKeys 而不是 defaultExpandAll：facets 是异步加载的，
@@ -509,18 +580,19 @@ export default function DefectTracking() {
             /* 只有一层，不允许收起根节点 */
           }}
           blockNode
-          selectedKeys={[selectedApp ?? ALL_APPS_KEY]}
+          selectedKeys={[selectedTreeKey]}
           onSelect={(keys) => {
             // 点已选中的节点时 antd 会回传空数组，这种情况保持原选择不动
             const key = keys[0] as string | undefined;
             if (!key) return;
-            setFilter("owningApp", key === ALL_APPS_KEY ? undefined : [key]);
+            setSelectedTreeKey(key);
+            setFilter("owningApp", appsOfNode(key));
           }}
         />
       </Card>
 
-      <div style={{ flex: 1, minWidth: 0 }}>
-      <Card size="small" style={{ marginBottom: 12 }}>
+      <div className="defect-main">
+      <Card size="small">
         <Space wrap size={[6, 6]}>
           <Input
             size="small"
@@ -687,6 +759,7 @@ export default function DefectTracking() {
             size="small"
             onClick={() => {
               setExtraFilters({});
+              setSelectedTreeKey(ALL_APPS_KEY);
               setPage(1);
             }}
           >
@@ -711,7 +784,12 @@ export default function DefectTracking() {
         </Space>
       </Card>
 
-      <Card size="small">
+      <Card size="small" className="defect-table-card">
+        <div
+          className="defect-table-scroll"
+          ref={tableWrapRef}
+          style={{ ["--dt-body-h" as string]: `${tableScrollY}px` } as CSSProperties}
+        >
         <DndContext sensors={sensors} modifiers={[restrictToHorizontalAxis]} onDragEnd={handleDragEnd}>
           <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
             <Table
@@ -721,7 +799,8 @@ export default function DefectTracking() {
               dataSource={data}
               columns={columns}
               pagination={false}
-              scroll={{ x: scrollX }}
+              sticky
+              scroll={{ x: scrollX, y: tableScrollY }}
               components={{ header: { cell: DraggableHeaderCell } }}
               onChange={(_, __, sorter: any) => {
                 // 点到第三下清空排序时，antd 给回的 sorter 里 field/columnKey 都是空的，
@@ -744,6 +823,7 @@ export default function DefectTracking() {
             />
           </SortableContext>
         </DndContext>
+        </div>
         <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
           <Pagination
             size="small"

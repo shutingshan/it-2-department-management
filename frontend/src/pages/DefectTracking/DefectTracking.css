@@ -1,0 +1,57 @@
+/* 整页撑满一屏并按列分区，让表格自己吃掉剩余高度：
+   这样列表只在表格内部纵向滚动，横向滚动条稳定停在屏幕底部，页面本身不出现滚动条。
+   88px 是顶部 Header + Content 内边距，跟工单中心保持一致 */
+.defect-page {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  height: calc(100vh - 88px);
+}
+
+.defect-tree-card {
+  width: 200px;
+  flex: 0 0 200px;
+  overflow: auto;
+}
+
+/* 右侧整体也是纵向弹性布局：筛选栏高度自适应（条件多时会换行），表格卡片吃掉剩余高度 */
+.defect-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.defect-table-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.defect-table-card .ant-card-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 表格区域吃掉卡片里除分页条以外的全部剩余高度；实际滚动高度由 JS 实测后传给 Table 的 scroll.y */
+.defect-table-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+/* antd 的 scroll.y 只设 max-height：数据不足一屏时表体会缩到内容高度，
+   横向滚动条跟着浮在半空。这里用 JS 实测的高度（--dt-body-h）兜一个 min-height，
+   让表体始终撑满可视区，横向滚动条稳定停在一屏底部 */
+.defect-table-scroll .ant-table-body {
+  min-height: var(--dt-body-h, 0px);
+}
+
+/* 列宽拖拽手柄是绝对定位的，表头单元格必须是定位父级 */
+.defect-table-card .ant-table-thead > tr > th {
+  position: relative;
+  background-clip: padding-box;
+}

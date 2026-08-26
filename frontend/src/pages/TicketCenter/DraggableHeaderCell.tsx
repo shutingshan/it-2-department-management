@@ -2,6 +2,7 @@ import type { CSSProperties, HTMLAttributes, MouseEvent as ReactMouseEvent } fro
 import { useRef } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import "./DraggableHeaderCell.css";
 
 interface Props extends HTMLAttributes<HTMLTableCellElement> {
   columnKey?: string;

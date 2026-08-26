@@ -49,6 +49,15 @@ export const MENU_PERMISSIONS: { key: MenuPermission; label: string }[] = [
   { key: "defects", label: "缺陷跟进" },
 ];
 
+// 缺陷跟进左侧应用树的分组节点。一个节点对应一个显示名称 + 若干归属应用，
+// 用来把零散的应用按业务线归拢（比如「供应链」下挂 ERP-业务、集采）。
+// 未配置任何节点时，树回落到原始形态：每个归属应用各占一个节点
+export interface DefectTreeNode {
+  id: string;
+  name: string;
+  apps: string[];
+}
+
 // 范围配置项。两处用途互相独立，配置为空都表示"不限制"（避免升级后老部署行为突变）：
 // - 受理人范围：「获取新工单」「全量获取」时只导入这些受理人的工单
 // - 分类范围：工单中心的显示范围，列表、统计卡片、导出三者口径一致

@@ -4,7 +4,7 @@ import { v4 as uuid } from "uuid";
 import { DEPARTMENTS, SEED_ADMIN, generateAccounts } from "./seed";
 import { buildUserDirectory } from "./userDirectory";
 import { applyDisplayScope, applyOwningAppExclusion, applyStatusExclusion } from "./filter";
-import { Account, ChangeLogEntry, Department, ScopeConfigItem, InSiteMessage, LogEntry, Ticket, User } from "./types";
+import { Account, ChangeLogEntry, DefectTreeNode, Department, ScopeConfigItem, InSiteMessage, LogEntry, Ticket, User } from "./types";
 
 // 工单/处理记录/站内信/同步日志是真实业务数据（不是每次启动都重新生成的模拟数据），
 // 必须落盘持久化，否则进程一重启（比如 ts-node-dev 检测到文件变化自动重启）就会全部丢失。
@@ -38,6 +38,8 @@ interface PersistedState {
   // 缺陷跟进页的分类范围。跟 displayCategories（工单中心）刻意分开：
   // 工单中心通常只留「需求」，缺陷跟进要看的正是被它挡掉的那些分类
   defectCategories: ScopeConfigItem[];
+  // 缺陷跟进左侧应用树的分组节点；为空表示按原始形态（一个应用一个节点）展示
+  defectTreeNodes: DefectTreeNode[];
 }
 
 interface SyncJob {
@@ -79,6 +81,7 @@ class Store {
   excludedStatuses: ScopeConfigItem[] = [];
   verifyTicketCodes: ScopeConfigItem[] = [];
   defectCategories: ScopeConfigItem[] = DEFAULT_DEFECT_CATEGORIES();
+  defectTreeNodes: DefectTreeNode[] = [];
 
   constructor() {
     this.load();
@@ -120,6 +123,8 @@ class Store {
       // 老的 store.json 里没有这个键（undefined）才用默认的「缺陷」打底；
       // 管理员确实把它删空了存的是 []，那是有效状态（=不限分类），要原样保留
       this.defectCategories = parsed.defectCategories ?? DEFAULT_DEFECT_CATEGORIES();
+      // 老数据没有这个键；空数组是有效状态（=按原始形态展示），不能被默认值盖掉
+      this.defectTreeNodes = parsed.defectTreeNodes ?? [];
 
       // 兜底：管理员账号是锁定的、页面上删不掉，但万一落盘数据被手工改坏导致一个管理员都没有，
       // 就会彻底登不进系统、也没有任何入口能把它加回来。这里补一个回去，避免被锁在门外
@@ -153,6 +158,7 @@ class Store {
         excludedStatuses: this.excludedStatuses,
         verifyTicketCodes: this.verifyTicketCodes,
         defectCategories: this.defectCategories,
+        defectTreeNodes: this.defectTreeNodes,
       };
       const tmpFile = `${DATA_FILE}.tmp`;
       fs.writeFileSync(tmpFile, JSON.stringify(state));

@@ -5,6 +5,7 @@ import { PlusOutlined } from "@ant-design/icons";
 import { api } from "../../api/client";
 import type { ScopeConfigItem, ScopeKind } from "../../api/types";
 import { useAuthStore } from "../../store/auth";
+import DefectTreeSection from "./DefectTreeSection";
 import "./ScopeConfig.css";
 
 interface SectionMeta {
@@ -225,6 +226,8 @@ export default function ScopeConfig() {
           </div>
         );
       })}
+
+      <DefectTreeSection />
 
       <Modal
         title={`${modal?.editing ? "编辑" : "新增"}${modal?.section.valueLabel ?? ""}`}

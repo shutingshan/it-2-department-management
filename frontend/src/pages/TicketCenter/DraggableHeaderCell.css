@@ -1,0 +1,25 @@
+/* 表头右边缘的列宽拖拽手柄：跟拖拽排序用的 .tc-col-drag-handle 是兄弟节点、不互相嵌套，
+   两者的指针事件不会冒泡穿过彼此，可以同时存在不冲突。
+   这些样式随组件一起引入——之前写在 TicketCenter.css 里，别的页面复用这个组件时
+   （比如缺陷跟进直接进 /defects）那份 CSS 根本没加载，手柄就是不可见也点不中的 */
+.tc-col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 1;
+  touch-action: none;
+}
+
+.tc-col-resize-handle:hover,
+.tc-col-resize-handle:active {
+  background: var(--app-resize-active);
+}
+
+/* 拖拽列宽期间选中态文字容易被误选，全局临时禁用；由 body.tc-resizing 控制，见组件里的拖拽逻辑 */
+body.tc-resizing {
+  cursor: col-resize !important;
+  user-select: none;
+}
