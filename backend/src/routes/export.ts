@@ -3,7 +3,7 @@ import ExcelJS from "exceljs";
 import { ZipArchive } from "archiver";
 import dayjs from "dayjs";
 import { store } from "../store";
-import { applyFilters, parseQuery, scopeForActor } from "../filter";
+import { applyFilters, parseQuery, scopeForActor, scopeForDefectActor } from "../filter";
 import { hoursDeviation, Ticket } from "../types";
 import { dedupe, stripCurrentIterationTag } from "../mapping";
 
@@ -42,9 +42,52 @@ const COLUMNS: { header: string; key: string; width: number }[] = [
   { header: "提交时间", key: "submittedAt", width: 18 },
 ];
 
+// 缺陷跟进的导出列：跟缺陷跟进列表的表头一一对应（列表上加/减列，这里要同步改），
+// 跟上面工单中心那套完全独立——两个页面展示的字段本来就不是一回事
+const DEFECT_COLUMNS: { header: string; key: string; width: number }[] = [
+  { header: "编号", key: "code", width: 18 },
+  { header: "归属应用", key: "owningApp", width: 16 },
+  { header: "发起人", key: "requester", width: 12 },
+  { header: "受理人", key: "itHandler", width: 12 },
+  { header: "状态", key: "status", width: 10 },
+  { header: "标题", key: "title", width: 32 },
+  { header: "内容", key: "content", width: 48 },
+  { header: "创建时间", key: "submittedAt", width: 18 },
+  { header: "是否有测试用例", key: "hasTestCase", width: 14 },
+  { header: "是否已补充测试用例", key: "testCaseSupplemented", width: 18 },
+  { header: "是否做自动化测试", key: "hasAutomatedTest", width: 16 },
+  { header: "自动化计划完成时间", key: "automationPlanCompleteTime", width: 18 },
+  { header: "完成情况", key: "completionStatus", width: 12 },
+  { header: "花费工时", key: "spentHours", width: 10 },
+  { header: "备注", key: "remark", width: 24 },
+];
+
 // 单元格取值口径跟列表渲染保持一致：数组用「、」连接，空值统一写 "-"
 const dash = (v: string | null | undefined) => (v && String(v).trim() ? v : "-");
 const joinList = (v: string[]) => (v.length ? v.join("、") : "-");
+// 三态字段：null=未填写，导出成 "-"，跟列表里显示的占位文案对齐
+const yesNo = (v: boolean | null) => (v === null || v === undefined ? "-" : v ? "是" : "否");
+
+function toDefectRow(t: Ticket) {
+  return {
+    code: t.code,
+    owningApp: dash(t.owningApp),
+    requester: dash(t.requester),
+    itHandler: dash(t.itHandler),
+    status: t.status,
+    title: t.title,
+    content: t.content,
+    submittedAt: t.submittedAt,
+    hasTestCase: yesNo(t.hasTestCase),
+    testCaseSupplemented: yesNo(t.testCaseSupplemented),
+    hasAutomatedTest: yesNo(t.hasAutomatedTest),
+    automationPlanCompleteTime: dash(t.automationPlanCompleteTime),
+    completionStatus: dash(t.completionStatus),
+    // 工时是数字，0 是有效值不能被 dash 当成空；未填写（null）才写 "-"
+    spentHours: t.spentHours ?? "-",
+    remark: dash(t.remark),
+  };
+}
 
 function toRow(t: Ticket) {
   return {
@@ -79,11 +122,12 @@ function toRow(t: Ticket) {
   };
 }
 
-function buildSheet(workbook: ExcelJS.Workbook, name: string, tickets: Ticket[]) {
+function buildSheet(workbook: ExcelJS.Workbook, name: string, tickets: Ticket[], isDefect = false) {
   const sheet = workbook.addWorksheet(name.slice(0, 28) || "工单");
-  sheet.columns = COLUMNS.map((c) => ({ header: c.header, key: c.key, width: c.width }));
+  const cols = isDefect ? DEFECT_COLUMNS : COLUMNS;
+  sheet.columns = cols.map((c) => ({ header: c.header, key: c.key, width: c.width }));
   sheet.getRow(1).font = { bold: true };
-  tickets.forEach((t) => sheet.addRow(toRow(t)));
+  tickets.forEach((t) => sheet.addRow(isDefect ? toDefectRow(t) : toRow(t)));
 }
 
 function attachmentHeaders(res: import("express").Response, fileName: string, isZip: boolean) {
@@ -100,19 +144,26 @@ function attachmentHeaders(res: import("express").Response, fileName: string, is
  * 三种模式的表格列完全一致，都是工单中心列表的全部字段。
  */
 router.post("/", async (req, res) => {
-  const { groupBy, scope, ids, actor, actorRole, ...filters } = req.body as {
+  const { groupBy, scope, view, ids, actor, actorRole, ...filters } = req.body as {
     groupBy?: string;
     scope?: string;
+    view?: string;
     ids?: string[];
     actor?: string;
     actorRole?: string;
   } & Record<string, unknown>;
 
+  // view=defect：缺陷跟进页的导出，分类范围与可见范围都换成缺陷那套，导出列也换成缺陷列表的列
+  const isDefect = view === "defect";
+
   // 导出范围必须跟列表一致：IT受理人只导自己负责的、需求方只导跟自己相关的，
   // 否则"全量导出"会把这些角色在列表里根本看不到的工单一并导出去
   // 导出范围跟列表保持一致：先按分类显示范围收敛，再按登录身份圈定
-  const visible = scopeForActor(store.visibleTickets, actor, actorRole);
+  const visible = isDefect
+    ? scopeForDefectActor(store.defectVisibleTickets, actor, actorRole)
+    : scopeForActor(store.visibleTickets, actor, actorRole);
   const stamp = dayjs().format("YYYYMMDD_HHmm");
+  const docName = isDefect ? "IT二部缺陷数据" : "IT二部工单数据";
 
   if (scope === "selected") {
     if (!ids?.length) {
@@ -124,8 +175,8 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ message: "勾选的工单都不存在或无权限导出" });
     }
     const workbook = new ExcelJS.Workbook();
-    buildSheet(workbook, "IT二部工单数据", selected);
-    attachmentHeaders(res, `IT二部工单数据_所选${selected.length}条_${stamp}.xlsx`, false);
+    buildSheet(workbook, docName, selected, isDefect);
+    attachmentHeaders(res, `${docName}_所选${selected.length}条_${stamp}.xlsx`, false);
     const buffer = await workbook.xlsx.writeBuffer();
     return res.end(Buffer.from(buffer));
   }
@@ -139,8 +190,8 @@ router.post("/", async (req, res) => {
 
   if (scope === "all") {
     const workbook = new ExcelJS.Workbook();
-    buildSheet(workbook, "IT二部工单数据", filtered);
-    attachmentHeaders(res, `IT二部工单数据_全量${filtered.length}条_${stamp}.xlsx`, false);
+    buildSheet(workbook, docName, filtered, isDefect);
+    attachmentHeaders(res, `${docName}_全量${filtered.length}条_${stamp}.xlsx`, false);
     const buffer = await workbook.xlsx.writeBuffer();
     return res.end(Buffer.from(buffer));
   }
@@ -155,7 +206,7 @@ router.post("/", async (req, res) => {
     groups.get(key)!.push(t);
   });
 
-  attachmentHeaders(res, `IT二部工单数据_${stamp}.zip`, true);
+  attachmentHeaders(res, `${docName}_${stamp}.zip`, true);
 
   const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on("error", (_err: Error) => {
@@ -164,9 +215,9 @@ router.post("/", async (req, res) => {
   archive.pipe(res);
 
   for (const [person, tickets] of groups) {
-    const fileName = `IT二部工单数据-${person}`;
+    const fileName = `${docName}-${person}`;
     const workbook = new ExcelJS.Workbook();
-    buildSheet(workbook, fileName, tickets);
+    buildSheet(workbook, fileName, tickets, isDefect);
     const buffer = await workbook.xlsx.writeBuffer();
     archive.append(Buffer.from(buffer), { name: `${fileName}.xlsx` });
   }

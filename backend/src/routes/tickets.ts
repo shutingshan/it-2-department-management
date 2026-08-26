@@ -148,19 +148,31 @@ router.patch("/:id", (req, res) => {
   const ticket = store.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ message: "工单不存在" });
 
-  const { fields, actor, actorRole } = req.body as {
+  const { fields, actor, actorRole, view } = req.body as {
     fields: Record<string, unknown>;
     actor: string;
     actorRole: string;
+    view?: string;
   };
   if (!actor) return res.status(400).json({ message: "缺少操作人信息，无法提交" });
 
-  // IT 受理人仅可编辑自己负责的数据；需求方仅可编辑发起人或关注人包含本人的数据
-  if (actorRole === "it_handler" && ticket.itHandler !== actor) {
-    return res.status(403).json({ message: "无权限：仅能编辑本人负责的工单" });
-  }
-  if (actorRole === "requester" && !canViewTicket(ticket, actor, actorRole)) {
-    return res.status(403).json({ message: "无权限：仅能编辑发起人或关注人包含本人的工单" });
+  if (view === "defect") {
+    // 缺陷跟进页：看得到就改得动（受理人或发起人是本人即可，管理员不受限）。
+    // 这里必须同时确认工单确实落在缺陷范围内——否则客户端只要带上 view=defect，
+    // 就能绕过下面工单中心那套更严的编辑权限去改别的分类的工单
+    const inDefectScope = store.defectVisibleTickets.some((t) => t.id === ticket.id);
+    const allowed = actorRole === "admin" || ticket.itHandler === actor || ticket.requester === actor;
+    if (!inDefectScope || !allowed) {
+      return res.status(403).json({ message: "无权限：仅能编辑本人受理或发起的缺陷" });
+    }
+  } else {
+    // IT 受理人仅可编辑自己负责的数据；需求方仅可编辑发起人或关注人包含本人的数据
+    if (actorRole === "it_handler" && ticket.itHandler !== actor) {
+      return res.status(403).json({ message: "无权限：仅能编辑本人负责的工单" });
+    }
+    if (actorRole === "requester" && !canViewTicket(ticket, actor, actorRole)) {
+      return res.status(403).json({ message: "无权限：仅能编辑发起人或关注人包含本人的工单" });
+    }
   }
 
   const changeEntries: ChangeLogEntry[] = [];
