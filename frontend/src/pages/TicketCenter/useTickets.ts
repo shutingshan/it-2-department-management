@@ -33,6 +33,9 @@ export interface TicketFilters {
   automationTo?: string;
   spentHoursMin?: number;
   spentHoursMax?: number;
+  // 头部「切换人员」选中的查看对象：按受理人或发起人命中。
+  // 跟筛选栏的 itHandler 分开，两者互不覆盖
+  viewTargets?: string[];
 }
 
 // 「未填写」在筛选参数里的表示，跟后端 filter.ts 的 EMPTY_TOKEN 保持一致

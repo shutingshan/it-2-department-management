@@ -1,8 +1,23 @@
 import { Router } from "express";
 import { store } from "../store";
+import { scopeForActor, scopeForDefectActor } from "../filter";
 import { Account, SYNC_PERMISSIONS } from "../types";
 
 const router = Router();
+
+/**
+ * 登录后落在哪个页面：
+ * - 管理员固定进工单中心（能看全部数据，不需要按有无数据判断）
+ * - 其余角色工单中心有数据就进工单中心；一条都没有、但缺陷跟进有，则直接进缺陷跟进，
+ *   避免只跟缺陷的同事一进来就看到一张空表、还以为没授权
+ * - 两边都没有数据时仍回工单中心，那里有统计卡片等更完整的空态
+ */
+function resolveLandingPage(user: { name: string; role: string }): string {
+  if (user.role === "admin") return "/tickets";
+  if (scopeForActor(store.visibleTickets, user.name, user.role).length > 0) return "/tickets";
+  if (scopeForDefectActor(store.defectVisibleTickets, user.name, user.role).length > 0) return "/defects";
+  return "/tickets";
+}
 
 function toSessionUser(account: Account) {
   const base = store.users.find((u) => u.id === account.userId);
@@ -35,7 +50,8 @@ router.post("/login", (req, res) => {
       adminName: admin?.name ?? "管理员",
     });
   }
-  return res.json({ user: toSessionUser(matched) });
+  const user = toSessionUser(matched);
+  return res.json({ user, landing: resolveLandingPage(user) });
 });
 
 router.get("/me", (req, res) => {

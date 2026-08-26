@@ -36,8 +36,17 @@ router.get("/card-stats", (req, res) => {
 // 不用人员目录（store.users）是因为那份是预置的部门人员名单，跟真实工单里实际出现的
 // 受理人不一定对得上：目录里有的人可能一条工单都没有，工单里的人也可能不在目录里。
 // 同样走分类显示范围：否则下拉里会出现"选了之后列表一条都没有"的人
-router.get("/it-handlers", (_req, res) => {
-  const names = dedupe(store.visibleTickets.map((t) => t.itHandler)).sort();
+// scope=defect 时改走缺陷口径：候选取自 defectVisibleTickets，且把「发起人」也算进来——
+// 缺陷页的「切换人员」是按「受理人或发起人」筛的，只列受理人的话，
+// 那些只提过缺陷、没受理过的人就永远选不到
+router.get("/it-handlers", (req, res) => {
+  const isDefect = (req.query as { scope?: string }).scope === "defect";
+  const source = isDefect ? store.defectVisibleTickets : store.visibleTickets;
+  const names = dedupe(
+    isDefect ? source.flatMap((t) => [t.itHandler, t.requester]) : source.map((t) => t.itHandler)
+  )
+    .filter((v) => v && v.trim())
+    .sort();
   const data = names.map((name) => {
     const matched = store.users.find((u) => u.name === name);
     return { id: matched?.id ?? name, name, avatarColor: matched?.avatarColor ?? "#999999" };

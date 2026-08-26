@@ -26,7 +26,9 @@ export default function Login() {
       setUser(res.data.user);
       setRememberedAccount(account.trim(), remember);
       message.success(`欢迎回来，${res.data.user.name}`);
-      navigate("/tickets");
+      // 落地页由后端按"这个人有哪边的数据"决定：只跟缺陷的同事直接进缺陷跟进，
+      // 不然一进来看到的是一张空的工单中心表
+      navigate(res.data.landing ?? "/tickets");
     } catch (e: any) {
       if (e?.response?.status === 404) {
         // 账号未在“账号配置”中授权：区分“未授权”与“系统加载失败”
