@@ -11,6 +11,7 @@ import messagesRouter from "./routes/messages";
 import departmentsRouter from "./routes/departments";
 import logsRouter from "./routes/logs";
 import exportRouter from "./routes/export";
+import settingsRouter from "./routes/settings";
 
 const app = express();
 const PORT = process.env.PORT ?? 4000;
@@ -27,6 +28,7 @@ app.use("/api/messages", messagesRouter);
 app.use("/api/departments", departmentsRouter);
 app.use("/api/logs", logsRouter);
 app.use("/api/export", exportRouter);
+app.use("/api/settings", settingsRouter);
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 

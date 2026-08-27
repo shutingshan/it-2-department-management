@@ -96,7 +96,7 @@ export default function FilterBar({
           showSearch
           placeholder="需方期望月度"
           style={{ minWidth: 150 }}
-          options={facets.monthlyPlans.map((v) => ({ value: v, label: v }))}
+          options={facets.expectedMonths.map((v) => ({ value: v, label: v }))}
           value={filters.expectedMonth}
           onChange={(v) => set("expectedMonth", v.length ? v : undefined)}
           maxTagCount={1}

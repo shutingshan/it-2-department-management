@@ -122,6 +122,19 @@ export interface Ticket {
   slaFlag: string | null;
 }
 
+// 「需方期望月度」下拉候选值的来源模式
+// monthlyPlan：取自系统内工单的月度计划字段；generated：以当前月份为基准自动生成；custom：手工维护的月份清单
+export type ExpectedMonthSourceMode = "monthlyPlan" | "generated" | "custom";
+
+export interface ExpectedMonthSource {
+  mode: ExpectedMonthSourceMode;
+  includeSubTickets: boolean; // monthlyPlan 模式下是否并入子需求的月度计划
+  pastMonths: number; // generated 模式下往前生成的月份数
+  futureMonths: number; // generated 模式下往后生成的月份数
+  customMonths: string[]; // custom 模式下的月份清单（YYYY-MM）
+  includeExistingValues: boolean; // 是否把已填写的期望月度并入候选，避免历史值选不回来
+}
+
 export interface InSiteMessage {
   id: string;
   toRole: Role;

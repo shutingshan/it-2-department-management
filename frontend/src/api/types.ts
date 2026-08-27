@@ -109,6 +109,23 @@ export interface Ticket {
   slaFlag: string | null;
 }
 
+export type ExpectedMonthSourceMode = "monthlyPlan" | "generated" | "custom";
+
+export interface ExpectedMonthSource {
+  mode: ExpectedMonthSourceMode;
+  includeSubTickets: boolean;
+  pastMonths: number;
+  futureMonths: number;
+  customMonths: string[];
+  includeExistingValues: boolean;
+}
+
+export const EXPECTED_MONTH_MODE_LABELS: Record<ExpectedMonthSourceMode, string> = {
+  monthlyPlan: "月度计划字段",
+  generated: "按当前月份自动生成",
+  custom: "自定义月份清单",
+};
+
 export interface InSiteMessage {
   id: string;
   toRole: Role;

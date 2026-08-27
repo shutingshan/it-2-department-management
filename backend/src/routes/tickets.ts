@@ -3,11 +3,12 @@ import dayjs from "dayjs";
 import { store } from "../store";
 import { applyFilters, parseQuery } from "../filter";
 import { dedupe } from "../mapping";
+import { isValidMonth, resolveExpectedMonthOptions } from "../settings";
 import { ChangeLogEntry } from "../types";
 
 const router = Router();
 
-// 系统内全部月度计划取值（含子需求月度计划与已填写的需方期望月度）
+// 系统内全部月度计划取值（含子需求月度计划与已填写的需方期望月度），供「月度计划」筛选使用
 function allMonthlyPlans(): string[] {
   return dedupe(
     store.tickets.flatMap((t) => [
@@ -34,6 +35,8 @@ router.get("/", (req, res) => {
     itHandlers: dedupe(filtered.map((t) => t.itHandler)).sort(),
     developers: dedupe(filtered.flatMap((t) => t.developer)).sort(),
     monthlyPlans: allMonthlyPlans(),
+    // 需方期望月度候选值按可配置的取值来源解析，默认取自月度计划字段
+    expectedMonths: resolveExpectedMonthOptions(store.tickets),
     iterations: dedupe(filtered.flatMap((t) => t.iterations.map((i) => i.name))).sort(),
     owningApps: dedupe(filtered.map((t) => t.owningApp)).sort(),
   };
@@ -41,9 +44,13 @@ router.get("/", (req, res) => {
   res.json({ data: pageData, total: filtered.length, facets, lastUpdateTime: store.lastUpdateTime });
 });
 
-// 月度候选值单独暴露：详情抽屉等场景不需要为了取下拉值去拉整张列表
+// 候选值单独暴露：详情抽屉等场景不需要为了取下拉值去拉整张列表
 router.get("/options/monthly-plans", (_req, res) => {
   res.json({ data: allMonthlyPlans() });
+});
+
+router.get("/options/expected-months", (_req, res) => {
+  res.json({ data: resolveExpectedMonthOptions(store.tickets) });
 });
 
 router.get("/:id", (req, res) => {
@@ -82,6 +89,17 @@ router.patch("/:id", (req, res) => {
       });
     }
   }
+
+  const expectedMonth = fields.expectedMonth;
+  if (
+    "expectedMonth" in fields &&
+    expectedMonth !== null &&
+    expectedMonth !== "" &&
+    !(typeof expectedMonth === "string" && isValidMonth(expectedMonth))
+  ) {
+    return res.status(400).json({ message: "字段校验失败：需方期望月度需为 YYYY-MM 格式" });
+  }
+  if (fields.expectedMonth === "") fields.expectedMonth = null;
 
   const changeEntries: ChangeLogEntry[] = [];
   for (const key of Object.keys(fields)) {

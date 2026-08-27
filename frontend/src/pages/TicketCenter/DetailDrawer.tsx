@@ -35,7 +35,7 @@ export default function DetailDrawer({
   const [edited, setEdited] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
   const [subTab, setSubTab] = useState<"detail" | "history">("detail");
-  // 需方期望月度候选值：系统内全部月度计划取值
+  // 需方期望月度候选值：按后端配置的取值来源解析
   const [monthOptions, setMonthOptions] = useState<string[]>([]);
 
   useEffect(() => {
@@ -45,7 +45,7 @@ export default function DetailDrawer({
         setEdited({});
         setSubTab("detail");
       });
-      api.get("/tickets/options/monthly-plans").then((res) => setMonthOptions(res.data.data ?? []));
+      api.get("/tickets/options/expected-months").then((res) => setMonthOptions(res.data.data ?? []));
     }
   }, [open, ticketId]);
 

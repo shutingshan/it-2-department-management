@@ -25,6 +25,7 @@ export interface Facets {
   itHandlers: string[];
   developers: string[];
   monthlyPlans: string[];
+  expectedMonths: string[];
   iterations: string[];
   owningApps: string[];
 }
@@ -34,6 +35,7 @@ const EMPTY_FACETS: Facets = {
   itHandlers: [],
   developers: [],
   monthlyPlans: [],
+  expectedMonths: [],
   iterations: [],
   owningApps: [],
 };

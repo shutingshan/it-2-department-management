@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import path from "path";
+import { ExpectedMonthSource, ExpectedMonthSourceMode } from "./types";
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -13,7 +14,32 @@ function required(name: string): string {
   return v;
 }
 
+function intFromEnv(name: string, fallback: number): number {
+  const v = Number(process.env[name]);
+  return Number.isInteger(v) && v >= 0 ? v : fallback;
+}
+
+function boolFromEnv(name: string, fallback: boolean): boolean {
+  const v = process.env[name];
+  return v === undefined || v === "" ? fallback : v === "true";
+}
+
 export const config = {
+  // 「需方期望月度」下拉取值来源的默认配置；运行期可通过 /api/settings 覆盖并落盘
+  get expectedMonthSource(): ExpectedMonthSource {
+    const mode = process.env.EXPECTED_MONTH_SOURCE_MODE as ExpectedMonthSourceMode | undefined;
+    return {
+      mode: mode === "generated" || mode === "custom" ? mode : "monthlyPlan",
+      includeSubTickets: boolFromEnv("EXPECTED_MONTH_INCLUDE_SUB_TICKETS", true),
+      pastMonths: intFromEnv("EXPECTED_MONTH_PAST_MONTHS", 3),
+      futureMonths: intFromEnv("EXPECTED_MONTH_FUTURE_MONTHS", 12),
+      customMonths: (process.env.EXPECTED_MONTH_CUSTOM_MONTHS ?? "")
+        .split(",")
+        .map((m) => m.trim())
+        .filter(Boolean),
+      includeExistingValues: boolFromEnv("EXPECTED_MONTH_INCLUDE_EXISTING", true),
+    };
+  },
   dangquyun: {
     get username() {
       return required("DANGQUYUN_USERNAME");

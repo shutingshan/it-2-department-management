@@ -18,6 +18,7 @@ import {
   DownloadOutlined,
   ExportOutlined,
   ReloadOutlined,
+  SettingOutlined,
   UnorderedListOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
@@ -31,6 +32,7 @@ import type { TicketFilters } from "./useTickets";
 import FilterBar from "./FilterBar";
 import DetailDrawer from "./DetailDrawer";
 import KanbanView from "./KanbanView";
+import ExpectedMonthSourceModal from "./ExpectedMonthSourceModal";
 import "./TicketCenter.css";
 
 export default function TicketCenter() {
@@ -50,6 +52,7 @@ export default function TicketCenter() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [batchTransferOpen, setBatchTransferOpen] = useState(false);
+  const [monthSourceOpen, setMonthSourceOpen] = useState(false);
   const [localRefresh, setLocalRefresh] = useState(0);
 
   const { data, total, facets, loading, reload, patchRow } = useTickets(
@@ -183,7 +186,7 @@ export default function TicketCenter() {
       render: (_, r) => (
         <ExpectedMonthCell
           ticket={r}
-          options={facets.monthlyPlans}
+          options={facets.expectedMonths}
           onSaved={(val) => patchRow(r.id, { expectedMonth: val })}
         />
       ),
@@ -236,6 +239,11 @@ export default function TicketCenter() {
           <Button icon={<ExportOutlined />} onClick={() => setExportOpen(true)}>
             导出
           </Button>
+          {user?.role === "admin" && (
+            <Button icon={<SettingOutlined />} onClick={() => setMonthSourceOpen(true)}>
+              期望月度来源
+            </Button>
+          )}
         </Space>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => setLocalRefresh((x) => x + 1)} />
@@ -345,6 +353,12 @@ export default function TicketCenter() {
           </Button>
         </Space>
       </Modal>
+
+      <ExpectedMonthSourceModal
+        open={monthSourceOpen}
+        onClose={() => setMonthSourceOpen(false)}
+        onSaved={reload}
+      />
 
       <BatchTransferModal
         open={batchTransferOpen}
