@@ -43,6 +43,7 @@ const DEFAULT_MIDDLE_ORDER = [
   "urgent",
   "priority",
   "monthlyPlan",
+  "expectedMonth",
   "iterations",
   "expectedTriageTime",
   "actualTriageTime",
@@ -222,6 +223,65 @@ function InlineMonthlyPlanInput({
       onBlur={() => commit(value)}
       maxTagCount={1}
       tokenSeparators={["、", ",", "，"]}
+    />
+  );
+}
+
+// 需方期望月度：需方自己维护的字段，所以不像月度计划那样限管理员；
+// 候选值来自后端按「取值来源」配置解析出的清单（范围配置页可改），不是 tags 模式，
+// 只能从清单里选——月份格式统一了，按月份筛选和统计才不会被手输的脏值打乱
+function InlineExpectedMonthInput({
+  ticket,
+  options,
+  onSaved,
+}: {
+  ticket: Ticket;
+  options: string[];
+  onSaved: () => void;
+}) {
+  const { user } = useAuthStore();
+  const [saving, setSaving] = useState(false);
+
+  // 已填写的值可能不在当前候选里（管理员改窄了取值来源），补进去，
+  // 否则 antd 会把它当成无效值、单元格显示空白，看起来像数据丢了
+  const selectOptions = useMemo(() => {
+    const values =
+      ticket.expectedMonth && !options.includes(ticket.expectedMonth)
+        ? [ticket.expectedMonth, ...options]
+        : options;
+    return values.map((v) => ({ value: v, label: v }));
+  }, [options, ticket.expectedMonth]);
+
+  if (!user) return <>{ticket.expectedMonth ?? "-"}</>;
+
+  async function commit(next: string | null) {
+    if (!user || next === (ticket.expectedMonth ?? null)) return;
+    setSaving(true);
+    try {
+      await api.patch(`/tickets/${ticket.id}`, {
+        fields: { expectedMonth: next },
+        actor: user.name,
+        actorRole: user.role,
+      });
+      onSaved();
+    } catch (e: any) {
+      message.error(e?.response?.data?.message ?? "需方期望月度保存失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Select
+      size="small"
+      allowClear
+      showSearch
+      style={{ width: "100%" }}
+      placeholder="选择月度"
+      disabled={saving}
+      value={ticket.expectedMonth ?? undefined}
+      options={selectOptions}
+      onChange={(v) => commit((v as string | undefined) ?? null)}
     />
   );
 }
@@ -510,6 +570,14 @@ export default function TicketCenter() {
         // 同时是 tags 模式，列表里还没出现过的新值也能直接输入
         render: (_: string[], r: Ticket) => (
           <InlineMonthlyPlanInput ticket={r} options={facets.monthlyPlans} onSaved={reload} />
+        ),
+      },
+      expectedMonth: {
+        title: "需方期望月度",
+        dataIndex: "expectedMonth",
+        width: 140,
+        render: (_: string | null, r: Ticket) => (
+          <InlineExpectedMonthInput ticket={r} options={facets.expectedMonths} onSaved={reload} />
         ),
       },
       iterations: {

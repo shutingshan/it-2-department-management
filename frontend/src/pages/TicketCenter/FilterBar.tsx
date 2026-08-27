@@ -109,6 +109,18 @@ export default function FilterBar({
           size="small"
           mode="multiple"
           allowClear
+          showSearch
+          placeholder="需方期望月度"
+          style={{ minWidth: 150 }}
+          options={facets.expectedMonths.map((v) => ({ value: v, label: v }))}
+          value={filters.expectedMonth}
+          onChange={(v) => set("expectedMonth", v.length ? v : undefined)}
+          maxTagCount={1}
+        />
+        <Select
+          size="small"
+          mode="multiple"
+          allowClear
           placeholder="迭代"
           style={{ minWidth: 130 }}
           options={facets.iterations.map((v) => ({ value: v, label: v }))}

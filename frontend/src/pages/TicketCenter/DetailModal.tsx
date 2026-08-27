@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Descriptions, Input, Modal, Space, Table, Tag, Timeline, Typography, message } from "antd";
+import { Button, Descriptions, Input, Modal, Select, Space, Table, Tag, Timeline, Typography, message } from "antd";
 import { CopyOutlined, LinkOutlined } from "@ant-design/icons";
 import { api } from "../../api/client";
 import { formatIterations, hoursDeviation, STAGE_COLORS } from "../../api/types";
@@ -20,7 +20,13 @@ export default function DetailModal({
 }) {
   const { user } = useAuthStore();
   const [ticket, setTicket] = useState<Ticket | null>(null);
-  const [edited, setEdited] = useState<{ urgent?: string; remark?: string }>({});
+  const [edited, setEdited] = useState<{
+    urgent?: string;
+    remark?: string;
+    expectedMonth?: string | null;
+  }>({});
+  // 需方期望月度的候选值：走后端「取值来源」配置，跟列表里那一列同源
+  const [monthOptions, setMonthOptions] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [subTab, setSubTab] = useState<"detail" | "history">("detail");
 
@@ -33,6 +39,9 @@ export default function DetailModal({
           setEdited({});
           setSubTab("detail");
         });
+      api
+        .get("/expected-month-source")
+        .then((res) => setMonthOptions(res.data.options ?? []));
     }
   }, [open, ticketId, user]);
 
@@ -148,6 +157,19 @@ export default function DetailModal({
             </Descriptions.Item>
             <Descriptions.Item label="优先级">{ticket.priority ?? "-"}</Descriptions.Item>
             <Descriptions.Item label="月度计划">{ticket.monthlyPlan.join("、") || "-"}</Descriptions.Item>
+            <Descriptions.Item label="需方期望月度">
+              <Select
+                size="small"
+                allowClear
+                showSearch
+                style={{ width: "100%" }}
+                disabled={!canEdit}
+                placeholder="选择月度"
+                value={(edited.expectedMonth as string | null | undefined) ?? ticket.expectedMonth ?? undefined}
+                options={monthOptions.map((v) => ({ value: v, label: v }))}
+                onChange={(v) => setEdited((s) => ({ ...s, expectedMonth: v ?? null }))}
+              />
+            </Descriptions.Item>
             <Descriptions.Item label="迭代">{formatIterations(ticket.iterations)}</Descriptions.Item>
             <Descriptions.Item label="预计梳理完成时间">{ticket.expectedTriageTime ?? "-"}</Descriptions.Item>
             <Descriptions.Item label="实际梳理完成时间">{ticket.actualTriageTime ?? "-"}</Descriptions.Item>

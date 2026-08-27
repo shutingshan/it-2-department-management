@@ -51,6 +51,24 @@ export type ScopeKind =
   | "excludedStatuses"
   | "verifyCodes";
 
+// 「需方期望月度」下拉候选值的取值来源（跟后端 types.ts 的 ExpectedMonthSource 对应）
+export type ExpectedMonthSourceMode = "monthlyPlan" | "generated" | "custom";
+
+export interface ExpectedMonthSource {
+  mode: ExpectedMonthSourceMode;
+  includeSubTickets: boolean;
+  pastMonths: number;
+  futureMonths: number;
+  customMonths: string[];
+  includeExistingValues: boolean;
+}
+
+export const EXPECTED_MONTH_MODE_LABELS: Record<ExpectedMonthSourceMode, string> = {
+  monthlyPlan: "取自月度计划字段",
+  generated: "按当前月份自动生成",
+  custom: "自定义月份清单",
+};
+
 // 缺陷跟进左侧应用树的分组节点（跟后端 types.ts 的 DefectTreeNode 对应）
 export interface DefectTreeNode {
   id: string;
@@ -178,6 +196,7 @@ export interface Ticket {
   priority: string | null;
   isReturned: boolean;
   monthlyPlan: string[];
+  expectedMonth: string | null;
   iterations: IterationRef[];
   expectedTriageTime: string | null;
   actualTriageTime: string | null;

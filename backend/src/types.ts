@@ -52,6 +52,19 @@ export const MENU_PERMISSIONS: { key: MenuPermission; label: string }[] = [
 // 缺陷跟进左侧应用树的分组节点。一个节点对应一个显示名称 + 若干归属应用，
 // 用来把零散的应用按业务线归拢（比如「供应链」下挂 ERP-业务、集采）。
 // 未配置任何节点时，树回落到原始形态：每个归属应用各占一个节点
+// 「需方期望月度」下拉候选值的来源。三种取法各有适用场景，见 expectedMonth.ts
+// monthlyPlan：取自工单已有的月度计划字段；generated：按当前月份自动生成；custom：手工维护的清单
+export type ExpectedMonthSourceMode = "monthlyPlan" | "generated" | "custom";
+
+export interface ExpectedMonthSource {
+  mode: ExpectedMonthSourceMode;
+  includeSubTickets: boolean; // monthlyPlan 模式：是否并入子需求的月度计划
+  pastMonths: number; // generated 模式：往前生成几个月
+  futureMonths: number; // generated 模式：往后生成几个月
+  customMonths: string[]; // custom 模式：手工维护的月份清单（YYYY-MM）
+  includeExistingValues: boolean; // 是否并入已填写的期望月度，避免来源收窄后历史值选不回来
+}
+
 export interface DefectTreeNode {
   id: string;
   name: string;
@@ -186,6 +199,7 @@ export interface Ticket {
   priority: string | null; // 优先级（当曲云字段，如 High/Middle/Low）
   isReturned: boolean; // 是否退回
   monthlyPlan: string[]; // 月度计划（去重）
+  expectedMonth: string | null; // 需方期望月度（YYYY-MM），需方自行维护，候选值来源可配置
   iterations: IterationRef[]; // 迭代子表
   expectedTriageTime: string | null; // 预计梳理完成时间（当曲云）
   actualTriageTime: string | null; // 实际梳理完成时间（当曲云）

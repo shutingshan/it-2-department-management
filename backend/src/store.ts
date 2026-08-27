@@ -4,7 +4,8 @@ import { v4 as uuid } from "uuid";
 import { DEPARTMENTS, SEED_ADMIN, generateAccounts } from "./seed";
 import { buildUserDirectory } from "./userDirectory";
 import { applyDisplayScope, applyOwningAppExclusion, applyStatusExclusion } from "./filter";
-import { Account, ChangeLogEntry, DefectTreeNode, Department, ScopeConfigItem, InSiteMessage, LogEntry, Ticket, User } from "./types";
+import { DEFAULT_EXPECTED_MONTH_SOURCE } from "./expectedMonth";
+import { Account, ChangeLogEntry, DefectTreeNode, Department, ExpectedMonthSource, ScopeConfigItem, InSiteMessage, LogEntry, Ticket, User } from "./types";
 
 // 工单/处理记录/站内信/同步日志是真实业务数据（不是每次启动都重新生成的模拟数据），
 // 必须落盘持久化，否则进程一重启（比如 ts-node-dev 检测到文件变化自动重启）就会全部丢失。
@@ -40,6 +41,8 @@ interface PersistedState {
   defectCategories: ScopeConfigItem[];
   // 缺陷跟进左侧应用树的分组节点；为空表示按原始形态（一个应用一个节点）展示
   defectTreeNodes: DefectTreeNode[];
+  // 「需方期望月度」下拉候选值的取值来源，管理员在范围配置页维护
+  expectedMonthSource: ExpectedMonthSource;
 }
 
 interface SyncJob {
@@ -82,6 +85,7 @@ class Store {
   verifyTicketCodes: ScopeConfigItem[] = [];
   defectCategories: ScopeConfigItem[] = DEFAULT_DEFECT_CATEGORIES();
   defectTreeNodes: DefectTreeNode[] = [];
+  expectedMonthSource: ExpectedMonthSource = DEFAULT_EXPECTED_MONTH_SOURCE();
 
   constructor() {
     this.load();
@@ -102,6 +106,7 @@ class Store {
         hasAutomatedTest: t.hasAutomatedTest ?? null,
         automationPlanCompleteTime: t.automationPlanCompleteTime ?? null,
         completionStatus: t.completionStatus ?? "",
+        expectedMonth: t.expectedMonth ?? null,
         spentHours: t.spentHours ?? null,
       }));
       this.messages = parsed.messages ?? [];
@@ -125,6 +130,9 @@ class Store {
       this.defectCategories = parsed.defectCategories ?? DEFAULT_DEFECT_CATEGORIES();
       // 老数据没有这个键；空数组是有效状态（=按原始形态展示），不能被默认值盖掉
       this.defectTreeNodes = parsed.defectTreeNodes ?? [];
+      // 老数据没有这个键时回退到默认来源（取自月度计划字段），即升级前的行为；
+      // 逐项 ?? 兜底，避免以后新增配置项时旧落盘数据缺键导致 undefined 流进业务逻辑
+      this.expectedMonthSource = { ...DEFAULT_EXPECTED_MONTH_SOURCE(), ...parsed.expectedMonthSource };
 
       // 兜底：管理员账号是锁定的、页面上删不掉，但万一落盘数据被手工改坏导致一个管理员都没有，
       // 就会彻底登不进系统、也没有任何入口能把它加回来。这里补一个回去，避免被锁在门外
@@ -159,6 +167,7 @@ class Store {
         verifyTicketCodes: this.verifyTicketCodes,
         defectCategories: this.defectCategories,
         defectTreeNodes: this.defectTreeNodes,
+        expectedMonthSource: this.expectedMonthSource,
       };
       const tmpFile = `${DATA_FILE}.tmp`;
       fs.writeFileSync(tmpFile, JSON.stringify(state));

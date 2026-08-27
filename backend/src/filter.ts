@@ -11,6 +11,7 @@ export interface TicketQuery {
   status?: string[];
   urgent?: boolean;
   monthlyPlan?: string[];
+  expectedMonth?: string[];
   iteration?: string[];
   owningApp?: string[];
   category?: string[];
@@ -77,6 +78,7 @@ export function parseQuery(q: Record<string, unknown>): TicketQuery {
     status: toArray(q.status),
     urgent: toBool(q.urgent),
     monthlyPlan: toArray(q.monthlyPlan),
+    expectedMonth: toArray(q.expectedMonth),
     iteration: toArray(q.iteration),
     owningApp: toArray(q.owningApp),
     category: toArray(q.category),
@@ -130,6 +132,8 @@ export function applyFilters(tickets: Ticket[], q: TicketQuery): Ticket[] {
   if (q.urgent !== undefined) result = result.filter((t) => !!t.urgent.trim() === q.urgent);
   if (q.monthlyPlan?.length)
     result = result.filter((t) => t.monthlyPlan.some((m) => q.monthlyPlan!.includes(m)));
+  if (q.expectedMonth?.length)
+    result = result.filter((t) => !!t.expectedMonth && q.expectedMonth!.includes(t.expectedMonth));
   if (q.iteration?.length)
     result = result.filter((t) =>
       t.iterations.some((i) => q.iteration!.includes(stripCurrentIterationTag(i.name)))

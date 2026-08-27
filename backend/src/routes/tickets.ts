@@ -10,6 +10,7 @@ import {
   TicketQuery,
 } from "../filter";
 import { canAccessDefects } from "../permissions";
+import { MONTH_RE, resolveExpectedMonthOptions } from "../expectedMonth";
 import { dedupe, stripCurrentIterationTag } from "../mapping";
 import { computeCardStats } from "../cards";
 import { ChangeLogEntry } from "../types";
@@ -88,6 +89,9 @@ router.get("/", (req, res) => {
       facetSource("iteration").flatMap((t) => t.iterations.map((i) => stripCurrentIterationTag(i.name)))
     ).sort(),
     owningApps: dedupe(facetSource("owningApp").map((t) => t.owningApp)).sort(),
+    // 期望月度的候选值不走 facetSource：它不是"当前数据里出现过什么"，而是管理员配置的
+    // 一份可选清单（见 expectedMonth.ts），需方要能填系统里还没排到的月份
+    expectedMonths: resolveExpectedMonthOptions(store.tickets, store.expectedMonthSource),
     categories: dedupe(facetSource("category").map((t) => t.category)).sort(),
   };
 
@@ -109,6 +113,7 @@ const EDITABLE_FIELDS = [
   "urgent",
   "remark",
   "monthlyPlan",
+  "expectedMonth",
   "hasTestCase",
   "testCaseSupplemented",
   "hasAutomatedTest",
@@ -123,6 +128,12 @@ const ADMIN_ONLY_FIELDS: string[] = ["monthlyPlan"];
 const ARRAY_FIELDS: string[] = ["monthlyPlan"];
 
 function normalizeFieldValue(key: string, raw: unknown): unknown {
+  // 期望月度清空时前端传的是空串（Select allowClear），统一归一成 null，
+  // 免得落盘里同时存在 null 和 "" 两种"没填"
+  if (key === "expectedMonth") {
+    const v = typeof raw === "string" ? raw.trim() : raw;
+    return v === "" || v === undefined ? null : v;
+  }
   if (!ARRAY_FIELDS.includes(key)) return raw;
   const list = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/[、,，]/) : [];
   return dedupe(list.map((v) => String(v).trim()).filter(Boolean));
@@ -149,6 +160,10 @@ function validateFieldValue(key: string, v: unknown): string | null {
     return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)
       ? null
       : "automationPlanCompleteTime 只能是 YYYY-MM-DD 或空";
+  }
+  if (key === "expectedMonth") {
+    if (v === null) return null;
+    return typeof v === "string" && MONTH_RE.test(v) ? null : "需方期望月度只能是 YYYY-MM 或空";
   }
   if (key === "spentHours") {
     if (v === null) return null;

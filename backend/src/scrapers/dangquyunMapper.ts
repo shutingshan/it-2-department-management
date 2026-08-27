@@ -91,6 +91,8 @@ export function mapScrapedRowToTicket(row: ScrapedRow, existing?: Ticket): Ticke
     priority: emptyToNull(row["优先级"]),
     isReturned: existing?.isReturned ?? false,
     monthlyPlan: existing?.monthlyPlan ?? [],
+    // 需方期望月度是系统内自行维护的字段，当曲云没有对应列，同步时必须保留原值
+    expectedMonth: existing?.expectedMonth ?? null,
     iterations,
     expectedTriageTime: emptyToNull(row["预计梳理完成"]),
     // "实际梳理完成"跟"预计梳理完成"一样是列表里的列（而不需要打开详情页的考核信息 tab才能看到），

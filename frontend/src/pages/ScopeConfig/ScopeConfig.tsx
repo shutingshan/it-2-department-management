@@ -6,6 +6,7 @@ import { api } from "../../api/client";
 import type { ScopeConfigItem, ScopeKind } from "../../api/types";
 import { useAuthStore } from "../../store/auth";
 import DefectTreeSection from "./DefectTreeSection";
+import ExpectedMonthSection from "./ExpectedMonthSection";
 import "./ScopeConfig.css";
 
 interface SectionMeta {
@@ -228,6 +229,8 @@ export default function ScopeConfig() {
       })}
 
       <DefectTreeSection />
+
+      <ExpectedMonthSection />
 
       <Modal
         title={`${modal?.editing ? "编辑" : "新增"}${modal?.section.valueLabel ?? ""}`}

@@ -12,6 +12,7 @@ export interface TicketFilters {
   urgent?: boolean; // 筛选口径：true=紧急字段有值，false=无值
   hasTapd?: boolean;
   monthlyPlan?: string[];
+  expectedMonth?: string[];
   iteration?: string[];
   owningApp?: string[];
   category?: string[];
@@ -44,6 +45,7 @@ export interface Facets {
   itHandlers: string[];
   developers: string[];
   monthlyPlans: string[];
+  expectedMonths: string[];
   iterations: string[];
   owningApps: string[];
   categories: string[];
@@ -55,6 +57,7 @@ const EMPTY_FACETS: Facets = {
   itHandlers: [],
   developers: [],
   monthlyPlans: [],
+  expectedMonths: [],
   iterations: [],
   owningApps: [],
   categories: [],

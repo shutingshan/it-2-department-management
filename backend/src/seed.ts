@@ -303,6 +303,7 @@ export function genTicket(year: number, seqInYear: number, submittedAt: dayjs.Da
     priority: pick(["High High", "High", "Middle", "Low"]),
     isReturned: rand() > 0.9,
     monthlyPlan,
+    expectedMonth: monthlyPlan[0] ?? null,
     iterations,
     expectedTriageTime: expectedTriage.format("YYYY-MM-DD"),
     actualTriageTime: actualTriage ? actualTriage.format("YYYY-MM-DD") : null,
