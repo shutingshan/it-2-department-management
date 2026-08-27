@@ -4,6 +4,7 @@ import {
   Descriptions,
   Drawer,
   Input,
+  Select,
   Space,
   Switch,
   Table,
@@ -34,6 +35,8 @@ export default function DetailDrawer({
   const [edited, setEdited] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
   const [subTab, setSubTab] = useState<"detail" | "history">("detail");
+  // 需方期望月度候选值：系统内全部月度计划取值
+  const [monthOptions, setMonthOptions] = useState<string[]>([]);
 
   useEffect(() => {
     if (open && ticketId) {
@@ -42,11 +45,14 @@ export default function DetailDrawer({
         setEdited({});
         setSubTab("detail");
       });
+      api.get("/tickets/options/monthly-plans").then((res) => setMonthOptions(res.data.data ?? []));
     }
   }, [open, ticketId]);
 
   const canEditAll = user?.role === "admin" || user?.role === "it_handler";
   const canEditUrgent = user?.role === "requester" || canEditAll;
+  // 需方期望月度与紧急字段同权限：需求方也可自行维护
+  const canEditExpectedMonth = canEditUrgent;
 
   async function handleSubmit() {
     if (!ticket || !user) return;
@@ -183,6 +189,22 @@ export default function DetailDrawer({
             </Descriptions.Item>
             <Descriptions.Item label="优先级">{ticket.priority ?? "-"}</Descriptions.Item>
             <Descriptions.Item label="月度计划">{ticket.monthlyPlan.join("、") || "-"}</Descriptions.Item>
+            <Descriptions.Item label="需方期望月度">
+              {canEditExpectedMonth ? (
+                <Select
+                  size="small"
+                  allowClear
+                  showSearch
+                  style={{ width: "100%", minWidth: 120 }}
+                  placeholder="选择月度"
+                  defaultValue={ticket.expectedMonth ?? undefined}
+                  options={monthOptions.map((v) => ({ value: v, label: v }))}
+                  onChange={(v) => setEdited((s) => ({ ...s, expectedMonth: v ?? null }))}
+                />
+              ) : (
+                ticket.expectedMonth ?? "-"
+              )}
+            </Descriptions.Item>
             <Descriptions.Item label="迭代">
               {ticket.iterations.map((i) => i.name).join("、") || "-"}
             </Descriptions.Item>

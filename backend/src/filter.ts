@@ -9,6 +9,7 @@ export interface TicketQuery {
   status?: string[];
   urgent?: boolean;
   monthlyPlan?: string[];
+  expectedMonth?: string[];
   iteration?: string[];
   owningApp?: string[];
   requesterDept?: string[];
@@ -33,6 +34,7 @@ export function parseQuery(q: Record<string, unknown>): TicketQuery {
     status: toArray(q.status),
     urgent: q.urgent === "true" ? true : q.urgent === "false" ? false : undefined,
     monthlyPlan: toArray(q.monthlyPlan),
+    expectedMonth: toArray(q.expectedMonth),
     iteration: toArray(q.iteration),
     owningApp: toArray(q.owningApp),
     requesterDept: toArray(q.requesterDept),
@@ -72,6 +74,8 @@ export function applyFilters(tickets: Ticket[], q: TicketQuery): Ticket[] {
   if (q.urgent !== undefined) result = result.filter((t) => t.urgent === q.urgent);
   if (q.monthlyPlan?.length)
     result = result.filter((t) => t.monthlyPlan.some((m) => q.monthlyPlan!.includes(m)));
+  if (q.expectedMonth?.length)
+    result = result.filter((t) => t.expectedMonth !== null && q.expectedMonth!.includes(t.expectedMonth));
   if (q.iteration?.length)
     result = result.filter((t) => t.iterations.some((i) => q.iteration!.includes(i.name)));
   if (q.owningApp?.length) result = result.filter((t) => q.owningApp!.includes(t.owningApp));

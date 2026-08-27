@@ -220,6 +220,12 @@ export function genTicket(year: number, seqInYear: number, submittedAt: dayjs.Da
     ? Number(subTickets.reduce((sum, s) => sum + s.actualHours, 0).toFixed(1))
     : actualHours;
 
+  // 需方期望月度：优先沿用月度计划首个月份，否则以提交月份为准，约三成工单需方未填写
+  const expectedMonth =
+    rand() > 0.7
+      ? null
+      : monthlyPlan[0] ?? submittedAt.add(randInt(0, 2), "month").format("YYYY-MM");
+
   const expectedTriage = submittedAt.add(randInt(1, 5), "day");
   const actualTriage = stage !== "待排期" ? expectedTriage.add(randInt(-1, 3), "day") : null;
   const expectedComplete = submittedAt.add(randInt(7, 30), "day");
@@ -270,6 +276,7 @@ export function genTicket(year: number, seqInYear: number, submittedAt: dayjs.Da
     priority: pick(["High", "Middle", "Low"]),
     isReturned: rand() > 0.9,
     monthlyPlan,
+    expectedMonth,
     iterations,
     expectedTriageTime: expectedTriage.format("YYYY-MM-DD"),
     actualTriageTime: actualTriage ? actualTriage.format("YYYY-MM-DD") : null,

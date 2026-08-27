@@ -10,6 +10,7 @@ export interface TicketFilters {
   status?: string[];
   urgent?: boolean;
   monthlyPlan?: string[];
+  expectedMonth?: string[];
   iteration?: string[];
   owningApp?: string[];
   requesterDept?: string[];
@@ -61,5 +62,10 @@ export function useTickets(filters: TicketFilters, page: number, pageSize: numbe
     load();
   }, [load]);
 
-  return { data, total, facets, loading, reload: load };
+  // 单元格内编辑后就地更新该行，避免为一个字段重拉整页
+  const patchRow = useCallback((id: string, patch: Partial<Ticket>) => {
+    setData((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  }, []);
+
+  return { data, total, facets, loading, reload: load, patchRow };
 }

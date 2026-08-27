@@ -106,6 +106,7 @@ export interface Ticket {
   priority: string | null; // 优先级（当曲云字段，如 High/Middle/Low）
   isReturned: boolean; // 是否退回
   monthlyPlan: string[]; // 月度计划（去重）
+  expectedMonth: string | null; // 需方期望月度（候选值取自月度计划字段）
   iterations: IterationRef[]; // 迭代子表
   expectedTriageTime: string | null; // 预计梳理完成时间（当曲云）
   actualTriageTime: string | null; // 实际梳理完成时间（当曲云）

@@ -82,11 +82,23 @@ export default function FilterBar({
         <Select
           mode="multiple"
           allowClear
+          showSearch
           placeholder="月度计划"
           style={{ minWidth: 130 }}
           options={facets.monthlyPlans.map((v) => ({ value: v, label: v }))}
           value={filters.monthlyPlan}
           onChange={(v) => set("monthlyPlan", v.length ? v : undefined)}
+          maxTagCount={1}
+        />
+        <Select
+          mode="multiple"
+          allowClear
+          showSearch
+          placeholder="需方期望月度"
+          style={{ minWidth: 150 }}
+          options={facets.monthlyPlans.map((v) => ({ value: v, label: v }))}
+          value={filters.expectedMonth}
+          onChange={(v) => set("expectedMonth", v.length ? v : undefined)}
           maxTagCount={1}
         />
         <Select

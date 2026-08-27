@@ -93,6 +93,7 @@ export interface Ticket {
   priority: string | null;
   isReturned: boolean;
   monthlyPlan: string[];
+  expectedMonth: string | null;
   iterations: IterationRef[];
   expectedTriageTime: string | null;
   actualTriageTime: string | null;

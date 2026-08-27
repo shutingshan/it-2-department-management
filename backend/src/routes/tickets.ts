@@ -7,6 +7,17 @@ import { ChangeLogEntry } from "../types";
 
 const router = Router();
 
+// 系统内全部月度计划取值（含子需求月度计划与已填写的需方期望月度）
+function allMonthlyPlans(): string[] {
+  return dedupe(
+    store.tickets.flatMap((t) => [
+      ...t.monthlyPlan,
+      ...t.subTickets.flatMap((s) => s.monthlyPlan),
+      ...(t.expectedMonth ? [t.expectedMonth] : []),
+    ])
+  ).sort();
+}
+
 router.get("/", (req, res) => {
   const q = parseQuery(req.query as Record<string, unknown>);
   const filtered = applyFilters(store.tickets, q);
@@ -16,17 +27,23 @@ router.get("/", (req, res) => {
   const start = (page - 1) * pageSize;
   const pageData = filtered.slice(start, start + pageSize);
 
-  // 下拉候选值以当前筛选结果为边界，不越界到全量数据
+  // 下拉候选值以当前筛选结果为边界，不越界到全量数据；
+  // 月度计划例外：筛选与「需方期望月度」下拉都需要系统内全量月度值，否则筛掉一次就再也选不回来
   const facets = {
     requesters: dedupe(filtered.map((t) => t.requester)).sort(),
     itHandlers: dedupe(filtered.map((t) => t.itHandler)).sort(),
     developers: dedupe(filtered.flatMap((t) => t.developer)).sort(),
-    monthlyPlans: dedupe(filtered.flatMap((t) => t.monthlyPlan)).sort(),
+    monthlyPlans: allMonthlyPlans(),
     iterations: dedupe(filtered.flatMap((t) => t.iterations.map((i) => i.name))).sort(),
     owningApps: dedupe(filtered.map((t) => t.owningApp)).sort(),
   };
 
   res.json({ data: pageData, total: filtered.length, facets, lastUpdateTime: store.lastUpdateTime });
+});
+
+// 月度候选值单独暴露：详情抽屉等场景不需要为了取下拉值去拉整张列表
+router.get("/options/monthly-plans", (_req, res) => {
+  res.json({ data: allMonthlyPlans() });
 });
 
 router.get("/:id", (req, res) => {
@@ -35,7 +52,15 @@ router.get("/:id", (req, res) => {
   res.json({ data: ticket });
 });
 
-const EDITABLE_FIELDS = ["urgent", "itHandler", "category", "module"] as const;
+const EDITABLE_FIELDS = ["urgent", "itHandler", "category", "module", "expectedMonth"] as const;
+
+// 需求方角色可自行维护的字段
+const REQUESTER_FIELDS = ["urgent", "expectedMonth"];
+
+// 变更记录展示值：null/undefined 统一记为空字符串，避免写入字面量 "null"
+function displayValue(v: unknown): string {
+  return v === null || v === undefined ? "" : String(v);
+}
 
 router.patch("/:id", (req, res) => {
   const ticket = store.getTicket(req.params.id);
@@ -48,12 +73,12 @@ router.patch("/:id", (req, res) => {
   };
   if (!actor) return res.status(400).json({ message: "缺少操作人信息，无法提交" });
 
-  // 需求方角色仅能编辑紧急字段
+  // 需求方角色仅能编辑紧急、需方期望月度字段
   if (actorRole === "requester") {
-    const disallowed = Object.keys(fields).filter((k) => k !== "urgent");
+    const disallowed = Object.keys(fields).filter((k) => !REQUESTER_FIELDS.includes(k));
     if (disallowed.length) {
       return res.status(403).json({
-        message: `权限不足：需求方仅可编辑紧急字段，无法修改 ${disallowed.join(",")}`,
+        message: `权限不足：需求方仅可编辑紧急、需方期望月度字段，无法修改 ${disallowed.join(",")}`,
       });
     }
   }
@@ -63,8 +88,8 @@ router.patch("/:id", (req, res) => {
     if (!EDITABLE_FIELDS.includes(key as any)) {
       return res.status(400).json({ message: `字段校验失败：${key} 不可编辑` });
     }
-    const oldValue = String((ticket as any)[key]);
-    const newValue = String((fields as any)[key]);
+    const oldValue = displayValue((ticket as any)[key]);
+    const newValue = displayValue((fields as any)[key]);
     if (oldValue !== newValue) {
       changeEntries.push({
         field: key,

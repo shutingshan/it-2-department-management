@@ -52,7 +52,7 @@ export default function TicketCenter() {
   const [batchTransferOpen, setBatchTransferOpen] = useState(false);
   const [localRefresh, setLocalRefresh] = useState(0);
 
-  const { data, total, facets, loading, reload } = useTickets(
+  const { data, total, facets, loading, reload, patchRow } = useTickets(
     filters,
     page,
     pageSize,
@@ -177,6 +177,18 @@ export default function TicketCenter() {
       render: (v: string[]) => v.join("、") || "-",
     },
     {
+      title: "需方期望月度",
+      dataIndex: "expectedMonth",
+      width: 140,
+      render: (_, r) => (
+        <ExpectedMonthCell
+          ticket={r}
+          options={facets.monthlyPlans}
+          onSaved={(val) => patchRow(r.id, { expectedMonth: val })}
+        />
+      ),
+    },
+    {
       title: "迭代",
       dataIndex: "iterations",
       width: 110,
@@ -250,7 +262,7 @@ export default function TicketCenter() {
               dataSource={data}
               columns={columns}
               pagination={false}
-              scroll={{ x: 2400, y: "calc(100vh - 420px)" }}
+              scroll={{ x: 2540, y: "calc(100vh - 420px)" }}
               rowSelection={{
                 selectedRowKeys: selectedKeys,
                 onChange: setSelectedKeys,
@@ -350,6 +362,62 @@ export default function TicketCenter() {
         }}
       />
     </div>
+  );
+}
+
+function ExpectedMonthCell({
+  ticket,
+  options,
+  onSaved,
+}: {
+  ticket: Ticket;
+  options: string[];
+  onSaved: (value: string | null) => void;
+}) {
+  const { user } = useAuthStore();
+  const [saving, setSaving] = useState(false);
+  const canEdit =
+    user?.role === "admin" || user?.role === "it_handler" || user?.role === "requester";
+
+  // 当前值可能是历史遗留月份，保证它始终出现在候选项里
+  const selectOptions = useMemo(() => {
+    const values = ticket.expectedMonth && !options.includes(ticket.expectedMonth)
+      ? [ticket.expectedMonth, ...options]
+      : options;
+    return values.map((v) => ({ value: v, label: v }));
+  }, [options, ticket.expectedMonth]);
+
+  if (!canEdit) return <>{ticket.expectedMonth ?? "-"}</>;
+
+  return (
+    <Select
+      size="small"
+      allowClear
+      showSearch
+      loading={saving}
+      style={{ width: "100%" }}
+      placeholder="选择月度"
+      options={selectOptions}
+      value={ticket.expectedMonth ?? undefined}
+      onChange={async (val) => {
+        if (!user) return;
+        const next = (val as string | undefined) ?? null;
+        setSaving(true);
+        try {
+          await api.patch(`/tickets/${ticket.id}`, {
+            fields: { expectedMonth: next },
+            actor: user.name,
+            actorRole: user.role,
+          });
+          onSaved(next);
+          message.success(next ? `需方期望月度已更新为 ${next}` : "已清空需方期望月度");
+        } catch (e: any) {
+          message.error(e?.response?.data?.message ?? "保存失败，请检查权限");
+        } finally {
+          setSaving(false);
+        }
+      }}
+    />
   );
 }
 

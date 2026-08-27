@@ -19,6 +19,7 @@ const COLUMNS: { header: string; key: keyof Ticket | "hoursDeviation"; width: nu
   { header: "工单阶段", key: "stage", width: 12 },
   { header: "状态", key: "status", width: 10 },
   { header: "紧急", key: "urgent", width: 8 },
+  { header: "需方期望月度", key: "expectedMonth", width: 14 },
   { header: "预估工时", key: "estimatedHours", width: 10 },
   { header: "实际工时", key: "actualHours", width: 10 },
   { header: "工时偏差", key: "hoursDeviation", width: 10 },

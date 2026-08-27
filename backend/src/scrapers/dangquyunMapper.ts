@@ -87,6 +87,7 @@ export function mapScrapedRowToTicket(row: ScrapedRow, existing?: Ticket): Ticke
     priority: emptyToNull(row["优先级"]),
     isReturned: existing?.isReturned ?? false,
     monthlyPlan: existing?.monthlyPlan ?? [],
+    expectedMonth: existing?.expectedMonth ?? emptyToNull(row["需方期望月度"]),
     iterations: existing?.iterations ?? [],
     expectedTriageTime: emptyToNull(row["预计梳理完成"]),
     actualTriageTime: existing?.actualTriageTime ?? null,
