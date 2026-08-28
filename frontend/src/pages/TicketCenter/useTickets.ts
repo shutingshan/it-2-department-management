@@ -9,6 +9,7 @@ export interface TicketFilters {
   submittedTo?: string;
   stage?: string[];
   status?: string[];
+  devStatus?: string[];
   urgent?: boolean; // 筛选口径：true=紧急字段有值，false=无值
   hasTapd?: boolean;
   monthlyPlan?: string[];
@@ -49,6 +50,7 @@ export interface Facets {
   iterations: string[];
   owningApps: string[];
   categories: string[];
+  devStatuses: string[];
 }
 
 const EMPTY_FACETS: Facets = {
@@ -61,6 +63,7 @@ const EMPTY_FACETS: Facets = {
   iterations: [],
   owningApps: [],
   categories: [],
+  devStatuses: [],
 };
 
 export function useTickets(filters: TicketFilters, page: number, pageSize: number, refreshKey: number) {

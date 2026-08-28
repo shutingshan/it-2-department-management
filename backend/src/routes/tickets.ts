@@ -4,6 +4,7 @@ import { backupStoreFile, store } from "../store";
 import {
   applyFilters,
   canViewTicket,
+  EMPTY_TOKEN,
   parseQuery,
   scopeForActor,
   scopeForDefectActor,
@@ -93,6 +94,9 @@ router.get("/", (req, res) => {
     // 一份可选清单（见 expectedMonth.ts），需方要能填系统里还没排到的月份
     expectedMonths: resolveExpectedMonthOptions(store.tickets, store.expectedMonthSource),
     categories: dedupe(facetSource("category").map((t) => t.category)).sort(),
+    // TAPD状态是 TAPD 那边的自由文本，取值不固定，只能从现有数据里汇总；
+    // 没关联/没同步过 TAPD 的工单为 null，用哨兵值占位，保证「未同步」也能被选中
+    devStatuses: dedupe(facetSource("devStatus").map((t) => t.devStatus || EMPTY_TOKEN)).sort(),
   };
 
   res.json({ data: pageData, total: filtered.length, facets, lastUpdateTime: store.lastUpdateTime });

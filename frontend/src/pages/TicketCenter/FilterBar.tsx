@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { DatePicker, Input, Select, Space, Button } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
+import { EMPTY_TOKEN } from "./useTickets";
 import type { Facets, TicketFilters } from "./useTickets";
 import { TICKET_STATUSES } from "../../api/types";
 
@@ -92,6 +93,23 @@ export default function FilterBar({
           options={STATUS_OPTIONS}
           value={filters.status}
           onChange={(v) => set("status", v.length ? v : undefined)}
+          maxTagCount={1}
+        />
+        <Select
+          size="small"
+          mode="multiple"
+          allowClear
+          showSearch
+          placeholder="TAPD状态"
+          style={{ minWidth: 120 }}
+          // TAPD状态取值不固定（TAPD 那边的自由文本），候选从当前数据里汇总，
+          // 没关联/没同步过 TAPD 的工单归到「未同步」这一项
+          options={facets.devStatuses.map((v) => ({
+            value: v,
+            label: v === EMPTY_TOKEN ? "未同步" : v,
+          }))}
+          value={filters.devStatus}
+          onChange={(v) => set("devStatus", v.length ? v : undefined)}
           maxTagCount={1}
         />
         <Select

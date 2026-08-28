@@ -9,6 +9,7 @@ export interface TicketQuery {
   submittedTo?: string;
   stage?: string[];
   status?: string[];
+  devStatus?: string[];
   urgent?: boolean;
   monthlyPlan?: string[];
   expectedMonth?: string[];
@@ -76,6 +77,7 @@ export function parseQuery(q: Record<string, unknown>): TicketQuery {
     submittedTo: q.submittedTo ? String(q.submittedTo) : undefined,
     stage: toArray(q.stage),
     status: toArray(q.status),
+    devStatus: toArray(q.devStatus),
     urgent: toBool(q.urgent),
     monthlyPlan: toArray(q.monthlyPlan),
     expectedMonth: toArray(q.expectedMonth),
@@ -128,6 +130,10 @@ export function applyFilters(tickets: Ticket[], q: TicketQuery): Ticket[] {
   if (q.submittedTo) result = result.filter((t) => t.submittedAt <= q.submittedTo!);
   if (q.stage?.length) result = result.filter((t) => q.stage!.includes(t.stage));
   if (q.status?.length) result = result.filter((t) => q.status!.includes(t.status));
+  // TAPD状态是从 TAPD 同步来的自由文本，没关联 TAPD 的工单为 null，
+  // 映射到哨兵值，让「未同步」能被单独筛出来
+  if (q.devStatus?.length)
+    result = result.filter((t) => q.devStatus!.includes(t.devStatus || EMPTY_TOKEN));
   // 紧急是文本字段，筛选按"有值/无值"判断，而不是等于某个具体文本
   if (q.urgent !== undefined) result = result.filter((t) => !!t.urgent.trim() === q.urgent);
   if (q.monthlyPlan?.length)
