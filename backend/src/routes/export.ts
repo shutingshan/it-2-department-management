@@ -1,4 +1,4 @@
-import { Router } from "express";
+import express, { Router } from "express";
 import ExcelJS from "exceljs";
 import { ZipArchive } from "archiver";
 import dayjs from "dayjs";
@@ -286,3 +286,125 @@ router.post("/", async (req, res) => {
 });
 
 export default router;
+
+// ---------------------------------------------------------------------------
+// 导入匹配状态：上传一份带工单编号的表格，按编号回填「状态」列后原样导回
+// ---------------------------------------------------------------------------
+
+// 上传文件里工单编号列的可能表头。不同人导出的表格叫法不一，都认一遍，
+// 认不出来时直接报错并把这几个名字告诉使用者，而不是默默匹配 0 条
+const CODE_HEADERS = ["工单编号", "工单编码", "编号", "工单号"];
+const STATUS_HEADER = "状态";
+const UNMATCHED_TEXT = "未匹配";
+
+/** 表头单元格的文本。ExcelJS 里富文本/公式单元格的 value 不是字符串，统一取纯文本 */
+function cellText(cell: ExcelJS.Cell | undefined): string {
+  if (!cell) return "";
+  const v = cell.value as unknown;
+  if (v === null || v === undefined) return "";
+  if (typeof v === "object") {
+    // 富文本 { richText: [...] } 与公式 { result: ... } 两种常见形态
+    const rich = (v as { richText?: { text: string }[] }).richText;
+    if (rich) return rich.map((r) => r.text).join("").trim();
+    const result = (v as { result?: unknown }).result;
+    if (result !== undefined && result !== null) return String(result).trim();
+    if (v instanceof Date) return "";
+    return "";
+  }
+  return String(v).trim();
+}
+
+/**
+ * 上传一份表格，按「工单编号」匹配库里的工单，把当前状态回填到「状态」列，再把整张表导回。
+ *
+ * 刻意保留上传文件的原有内容与列顺序，只动状态那一列：使用者拿回去的还是自己那张表，
+ * 只是多了状态，不需要再做一次对齐。原文件没有状态列时在最后新增一列。
+ *
+ * 匹配范围跟列表一致（scopeForActor）：IT受理人只匹配自己受理的、需求方只匹配跟自己相关的，
+ * 匹配不到的填「未匹配」，不会静默留空让人以为是漏填。
+ */
+router.post(
+  "/match-status",
+  express.raw({
+    type: [
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-excel",
+      "application/octet-stream",
+    ],
+    limit: "20mb",
+  }),
+  async (req, res) => {
+    const { actor, actorRole } = req.query as { actor?: string; actorRole?: string };
+    const buffer = req.body as Buffer;
+    if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
+      return res.status(400).json({ message: "没有读到上传的文件，请重新选择 Excel 文件" });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    try {
+      await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
+    } catch {
+      return res.status(400).json({ message: "文件解析失败，请确认上传的是 .xlsx 格式的 Excel 文件" });
+    }
+
+    const sheet = workbook.worksheets[0];
+    if (!sheet || sheet.rowCount < 2) {
+      return res.status(400).json({ message: "表格里没有数据行（第一行为表头，第二行起为数据）" });
+    }
+
+    // 表头固定认第一行：导出的表格都是这个形态，多加一层"找表头"的猜测反而不可控
+    const headerRow = sheet.getRow(1);
+    let codeCol = 0;
+    let statusCol = 0;
+    headerRow.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+      const text = cellText(cell);
+      if (!codeCol && CODE_HEADERS.includes(text)) codeCol = colNumber;
+      if (!statusCol && text === STATUS_HEADER) statusCol = colNumber;
+    });
+
+    if (!codeCol) {
+      return res.status(400).json({
+        message: `表格第一行没有找到工单编号列，表头需要是以下之一：${CODE_HEADERS.join("、")}`,
+      });
+    }
+    // 没有状态列就在最后补一列，不覆盖使用者原有的任何列
+    if (!statusCol) {
+      statusCol = sheet.columnCount + 1;
+      headerRow.getCell(statusCol).value = STATUS_HEADER;
+      headerRow.getCell(statusCol).font = { bold: true };
+      sheet.getColumn(statusCol).width = 12;
+    }
+
+    // 匹配范围跟列表一致；编号去空格后比对，避免复制粘贴带来的首尾空格匹配不上
+    const scoped = scopeForActor(store.tickets, actor, actorRole);
+    const statusByCode = new Map(scoped.map((t) => [t.code.trim(), t.status]));
+
+    let matched = 0;
+    let unmatched = 0;
+    for (let i = 2; i <= sheet.rowCount; i += 1) {
+      const row = sheet.getRow(i);
+      const code = cellText(row.getCell(codeCol));
+      if (!code) continue; // 空行/小计行之类，跳过不计数
+      const status = statusByCode.get(code);
+      row.getCell(statusCol).value = status ?? UNMATCHED_TEXT;
+      if (status) matched += 1;
+      else unmatched += 1;
+    }
+
+    if (matched === 0 && unmatched === 0) {
+      return res.status(400).json({ message: "表格里没有读到任何工单编号，请检查编号列是否为空" });
+    }
+
+    // 匹配结果写进文件名：下载后不打开也能一眼看到匹配情况
+    attachmentHeaders(
+      res,
+      `工单状态匹配结果_匹配${matched}条_未匹配${unmatched}条_${dayjs().format("YYYYMMDD_HHmm")}.xlsx`,
+      false
+    );
+    res.setHeader("X-Match-Total", String(matched + unmatched));
+    res.setHeader("X-Match-Matched", String(matched));
+    res.setHeader("X-Match-Unmatched", String(unmatched));
+    const out = await workbook.xlsx.writeBuffer();
+    return res.end(Buffer.from(out));
+  }
+);
