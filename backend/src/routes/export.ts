@@ -156,6 +156,7 @@ const REQUIREMENT_DETAIL_COLUMNS: { header: string; key: string; width: number }
   { header: "IT受理人", key: "itHandler", width: 12 },
   { header: "发起人", key: "requester", width: 12 },
   { header: "统计时间点", key: "timePoint", width: 14 },
+  { header: "模块来源", key: "moduleSource", width: 12 },
 ];
 
 // 需求分析看板的导出列，与页面表格一一对应
@@ -166,6 +167,7 @@ const REQUIREMENT_MODULE_COLUMNS: { header: string; key: string; width: number }
   { header: "最晚时间点", key: "lastTime", width: 14 },
   { header: "平均间隔（天）", key: "avgIntervalDays", width: 14 },
   { header: "频率", key: "frequency", width: 10 },
+  { header: "模块来源", key: "moduleSource", width: 12 },
 ];
 
 /**
@@ -233,7 +235,12 @@ router.post("/", async (req, res) => {
       sheet.columns = REQUIREMENT_DETAIL_COLUMNS.map((c) => ({ header: c.header, key: c.key, width: c.width }));
       sheet.getRow(1).font = { bold: true };
       row.tickets.forEach((d) =>
-        sheet.addRow({ ...d, expectedCompleteTime: dash(d.expectedCompleteTime), actualCompleteTime: dash(d.actualCompleteTime) })
+        sheet.addRow({
+          ...d,
+          expectedCompleteTime: dash(d.expectedCompleteTime),
+          actualCompleteTime: dash(d.actualCompleteTime),
+          moduleSource: d.fromOwningApp ? "归属应用" : "需求模块",
+        })
       );
       attachmentHeaders(
         res,
@@ -251,7 +258,11 @@ router.post("/", async (req, res) => {
     sheet.columns = REQUIREMENT_MODULE_COLUMNS.map((c) => ({ header: c.header, key: c.key, width: c.width }));
     sheet.getRow(1).font = { bold: true };
     stats.rows.forEach((r) =>
-      sheet.addRow({ ...r, avgIntervalDays: r.avgIntervalDays ?? "-" })
+      sheet.addRow({
+        ...r,
+        avgIntervalDays: r.avgIntervalDays ?? "-",
+        moduleSource: r.fromOwningApp ? "归属应用" : "需求模块",
+      })
     );
     attachmentHeaders(
       res,

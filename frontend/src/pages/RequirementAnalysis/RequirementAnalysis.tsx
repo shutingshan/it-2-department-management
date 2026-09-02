@@ -18,6 +18,7 @@ interface TicketDetail {
   itHandler: string;
   requester: string;
   timePoint: string;
+  fromOwningApp: boolean;
 }
 
 interface ModuleRow {
@@ -27,6 +28,7 @@ interface ModuleRow {
   lastTime: string;
   avgIntervalDays: number | null;
   frequency: Frequency;
+  fromOwningApp: boolean;
   tickets: TicketDetail[];
 }
 
@@ -46,7 +48,7 @@ const FREQ_COLORS: Record<Frequency, string> = { 高频: "red", 正常: "blue", 
 const RULE_TEXT =
   "统计范围：库内分类为「需求」，且状态不为「关闭」「新制」的工单。" +
   "时间点取法：状态为已解决/已完成的取「实际完成时间」，其余取「预计完成时间」。" +
-  "需求模块带「/」时只取最后一级。" +
+  "需求模块带「/」时只取最后一级；需求模块为空时改按「归属应用」统计（表格里会标注）。" +
   "平均间隔 =（最晚时间点 − 最早时间点）÷（条数 − 1）。" +
   "高频：平均间隔 < 1 个月且条数 ≥ 2；正常：1~3 个月且条数 ≥ 2；低频：间隔 > 3 个月，或该模块只有 1 条需求。" +
   "（1 个月按 30 天换算）";
@@ -199,7 +201,13 @@ export default function RequirementAnalysis() {
             dataIndex: "module",
             width: 220,
             ellipsis: true,
-            render: (v: string) => <a>{v}</a>,
+            render: (v: string, r: ModuleRow) => (
+              <Space size={4}>
+                <a>{v}</a>
+                {/* 这一行的模块名是拿归属应用顶上的，标出来免得被当成数据错了 */}
+                {r.fromOwningApp && <Tag>归属应用</Tag>}
+              </Space>
+            ),
           },
           {
             title: "需求条数",
@@ -259,7 +267,18 @@ export default function RequirementAnalysis() {
           columns={[
             { title: "工单编码", dataIndex: "code", width: 140 },
             { title: "归属应用", dataIndex: "owningApp", width: 120, ellipsis: true },
-            { title: "需求模块", dataIndex: "module", width: 140, ellipsis: true },
+            {
+              title: "需求模块",
+              dataIndex: "module",
+              width: 160,
+              ellipsis: true,
+              render: (v: string, r: TicketDetail) => (
+                <Space size={4}>
+                  <span>{v}</span>
+                  {r.fromOwningApp && <Tag>归属应用</Tag>}
+                </Space>
+              ),
+            },
             { title: "状态", dataIndex: "status", width: 90 },
             {
               title: "期望完成时间",

@@ -43,6 +43,8 @@ export interface RequirementTicketDetail {
   requester: string;
   // 该条实际参与频率计算的时间点。两个完成时间都有值时，看这一列才知道用的是哪个
   timePoint: string;
+  // 该条的需求模块为空、模块列的值是拿归属应用顶上的
+  fromOwningApp: boolean;
 }
 
 export interface RequirementModuleRow {
@@ -53,6 +55,9 @@ export interface RequirementModuleRow {
   // 平均间隔天数 =（最晚 − 最早）/（条数 − 1）；只有 1 条时无间隔可算，为 null
   avgIntervalDays: number | null;
   frequency: RequirementFrequency;
+  // 这一行的模块名整组都来自归属应用（组内工单的需求模块全为空）。
+  // 组内有真实需求模块时为 false，不给汇报制造噪音
+  fromOwningApp: boolean;
   // 该模块下参与统计的工单明细，按时间点升序。数据量是需求工单级别，
   // 直接随汇总一起返回，省掉点开明细时的二次请求，导出也复用同一份
   tickets: RequirementTicketDetail[];
@@ -69,12 +74,31 @@ export interface RequirementModuleStats {
   summary: Record<RequirementFrequency, number>;
 }
 
-/** 需求模块取值：带「/」时只要最后一级（当曲云上常写成「订单中心/支付模块」） */
-export function normalizeModule(v: string): string {
-  if (!v) return "-";
-  const idx = Math.max(v.lastIndexOf("/"), v.lastIndexOf("／"));
-  const tail = idx < 0 ? v : v.slice(idx + 1);
-  return tail.trim() || "-";
+// 需求模块没取到值时，当曲云同步会写成这个占位符（见 dangquyunMapper），
+// 跟空字符串一样都按"没填"处理
+const EMPTY_PLACEHOLDER = "-";
+
+/**
+ * 统计用的模块取值：
+ *   1. 需求模块有值时，带「/」只要最后一级（当曲云上常写成「订单中心/支付模块」）
+ *   2. 需求模块为空（含占位符「-」、以及「订单中心/」这种切完为空的）时，退回按归属应用统计
+ *   3. 归属应用也为空时才落到占位符
+ *
+ * 返回 fromOwningApp 是为了在页面和导出里标出这一行是拿归属应用顶上的——
+ * 不标的话，汇报时看到「需求模块」列里出现一个应用名会以为是数据错了
+ */
+export function resolveModuleKey(t: Pick<Ticket, "module" | "owningApp">): {
+  module: string;
+  fromOwningApp: boolean;
+} {
+  const raw = (t.module ?? "").trim();
+  if (raw && raw !== EMPTY_PLACEHOLDER) {
+    const idx = Math.max(raw.lastIndexOf("/"), raw.lastIndexOf("／"));
+    const tail = (idx < 0 ? raw : raw.slice(idx + 1)).trim();
+    if (tail && tail !== EMPTY_PLACEHOLDER) return { module: tail, fromOwningApp: false };
+  }
+  const app = (t.owningApp ?? "").trim();
+  return { module: app && app !== EMPTY_PLACEHOLDER ? app : EMPTY_PLACEHOLDER, fromOwningApp: true };
 }
 
 /**
@@ -123,7 +147,7 @@ export function computeRequirementModuleStats(
     years.add(Number(point.slice(0, 4)));
     if (year !== null && Number(point.slice(0, 4)) !== year) continue;
 
-    const module = normalizeModule(t.module);
+    const { module, fromOwningApp } = resolveModuleKey(t);
     const detail: RequirementTicketDetail = {
       code: t.code,
       owningApp: t.owningApp,
@@ -134,6 +158,7 @@ export function computeRequirementModuleStats(
       itHandler: t.itHandler,
       requester: t.requester,
       timePoint: point,
+      fromOwningApp,
     };
     const list = byModule.get(module);
     if (list) list.push(detail);
@@ -159,6 +184,7 @@ export function computeRequirementModuleStats(
       lastTime: last,
       avgIntervalDays,
       frequency: classify(count, avgIntervalDays),
+      fromOwningApp: details.every((d) => d.fromOwningApp),
       tickets: details,
     });
   }
