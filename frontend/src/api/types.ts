@@ -177,7 +177,7 @@ export interface Ticket {
   tapdUrl: string | null;
   category: string;
   owningApp: string;
-  module: string;
+  module: string; // 需求模块
   title: string;
   content: string;
   attachments: Attachment[];

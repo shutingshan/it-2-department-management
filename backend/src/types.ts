@@ -180,7 +180,7 @@ export interface Ticket {
   tapdUrl: string | null; // TAPD 地址
   category: string; // 分类：需求/数据处理...
   owningApp: string; // 归属应用
-  module: string; // 模块
+  module: string; // 需求模块（当曲云列名「需求模块」，旧版页面为「功能模块」）
   title: string;
   content: string;
   attachments: Attachment[];

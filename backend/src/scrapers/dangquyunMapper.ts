@@ -72,7 +72,7 @@ export function mapScrapedRowToTicket(row: ScrapedRow, existing?: Ticket): Ticke
     tapdUrl,
     category: row["分类"]?.trim() || "-",
     owningApp: row["归属应用"]?.trim() || "-",
-    module: row["功能模块"]?.trim() || "-",
+    module: row["需求模块"]?.trim() || row["功能模块"]?.trim() || "-",
     title: row["标题"]?.trim() || "",
     content: row["内容"]?.trim() || "",
     attachments: parseAttachments(row["附件"]),

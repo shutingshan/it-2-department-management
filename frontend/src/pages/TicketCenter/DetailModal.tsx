@@ -126,7 +126,7 @@ export default function DetailModal({
             </Descriptions.Item>
             <Descriptions.Item label="分类">{ticket.category}</Descriptions.Item>
             <Descriptions.Item label="归属应用">{ticket.owningApp}</Descriptions.Item>
-            <Descriptions.Item label="模块">{ticket.module}</Descriptions.Item>
+            <Descriptions.Item label="需求模块">{ticket.module}</Descriptions.Item>
             <Descriptions.Item label="TAPD 地址">
               {ticket.tapdUrl ? (
                 <a href={ticket.tapdUrl} target="_blank" rel="noreferrer">

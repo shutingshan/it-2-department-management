@@ -28,7 +28,7 @@ import DraggableHeaderCell from "./DraggableHeaderCell";
 import { copyText } from "../../utils/clipboard";
 import "./TicketCenter.css";
 
-const FIXED_LEFT_KEYS = ["code", "tapdUrl", "owningApp", "requester", "title"];
+const FIXED_LEFT_KEYS = ["code", "tapdUrl", "owningApp", "module", "requester", "title"];
 const DEFAULT_MIDDLE_ORDER = [
   "content",
   "category",
@@ -509,6 +509,7 @@ export default function TicketCenter() {
         render: (_: string | null, r: Ticket) => <TapdLinkCell ticket={r} />,
       },
       owningApp: { title: "归属应用", dataIndex: "owningApp", width: 110, ellipsis: true },
+      module: { title: "需求模块", dataIndex: "module", width: 120, ellipsis: true },
       requester: { title: "发起人", dataIndex: "requester", width: 90 },
       title: {
         title: "标题",
