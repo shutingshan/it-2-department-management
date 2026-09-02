@@ -1,0 +1,22 @@
+.req-analysis-page {
+  background: var(--app-surface);
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+
+.req-analysis-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.req-analysis-section {
+  margin-bottom: 20px;
+}
+
+.req-analysis-summary {
+  margin-bottom: 12px;
+}

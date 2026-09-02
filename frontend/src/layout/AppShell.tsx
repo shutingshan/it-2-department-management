@@ -6,6 +6,7 @@ import {
   AppstoreOutlined,
   BarChartOutlined,
   BugOutlined,
+  FundProjectionScreenOutlined,
   ClusterOutlined,
   FilterOutlined,
   HistoryOutlined,
@@ -60,13 +61,22 @@ export default function AppShell() {
   // 缺陷跟进按账号授权（账号配置里的「菜单权限」），管理员始终可见。
   // 紧跟在工单中心后面，跟原来的位置保持一致
   const canSeeDefects = user.role === "admin" || (user.menuPermissions ?? []).includes("defects");
-  const baseItems = canSeeDefects
-    ? [
-        ...BASE_MENU_ITEMS.slice(0, 2),
-        { key: "/defects", icon: <BugOutlined />, label: "缺陷跟进" },
-        ...BASE_MENU_ITEMS.slice(2),
-      ]
-    : BASE_MENU_ITEMS;
+  const canSeeRequirementAnalysis =
+    user.role === "admin" || (user.menuPermissions ?? []).includes("requirementAnalysis");
+  const baseItems = [
+    ...BASE_MENU_ITEMS.slice(0, 2),
+    ...(canSeeDefects ? [{ key: "/defects", icon: <BugOutlined />, label: "缺陷跟进" }] : []),
+    ...(canSeeRequirementAnalysis
+      ? [
+          {
+            key: "/requirement-analysis",
+            icon: <FundProjectionScreenOutlined />,
+            label: "需求分析看板",
+          },
+        ]
+      : []),
+    ...BASE_MENU_ITEMS.slice(2),
+  ];
 
   // "账号配置"/"变更日志"/"部门配置"仅管理员可见
   const MENU_ITEMS =

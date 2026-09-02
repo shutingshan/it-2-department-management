@@ -4,9 +4,10 @@ import { ZipArchive } from "archiver";
 import dayjs from "dayjs";
 import { store } from "../store";
 import { applyFilters, parseQuery, scopeForActor, scopeForDefectActor } from "../filter";
-import { canAccessDefects, isAdmin } from "../permissions";
+import { canAccessDefects, canAccessRequirementAnalysis, isAdmin } from "../permissions";
 import { hoursDeviation, Ticket } from "../types";
 import { dedupe, stripCurrentIterationTag } from "../mapping";
+import { computeRequirementModuleStats } from "../requirementModules";
 
 const router = Router();
 
@@ -144,6 +145,29 @@ function attachmentHeaders(res: import("express").Response, fileName: string, is
 // 这里只取「需求」这一项
 const REQUIREMENT_CATEGORY = "需求";
 
+// 需求分析看板 · 模块明细的导出列
+const REQUIREMENT_DETAIL_COLUMNS: { header: string; key: string; width: number }[] = [
+  { header: "工单编码", key: "code", width: 18 },
+  { header: "归属应用", key: "owningApp", width: 16 },
+  { header: "需求模块", key: "module", width: 20 },
+  { header: "状态", key: "status", width: 10 },
+  { header: "期望完成时间", key: "expectedCompleteTime", width: 14 },
+  { header: "实际完成时间", key: "actualCompleteTime", width: 14 },
+  { header: "IT受理人", key: "itHandler", width: 12 },
+  { header: "发起人", key: "requester", width: 12 },
+  { header: "统计时间点", key: "timePoint", width: 14 },
+];
+
+// 需求分析看板的导出列，与页面表格一一对应
+const REQUIREMENT_MODULE_COLUMNS: { header: string; key: string; width: number }[] = [
+  { header: "需求模块", key: "module", width: 24 },
+  { header: "需求条数", key: "count", width: 10 },
+  { header: "最早时间点", key: "firstTime", width: 14 },
+  { header: "最晚时间点", key: "lastTime", width: 14 },
+  { header: "平均间隔（天）", key: "avgIntervalDays", width: 14 },
+  { header: "频率", key: "frequency", width: 10 },
+];
+
 /**
  * 「库内全量需求工单」这一个导出里对需求模块的处理：值里带「/」时，去掉「/」及其之前的内容。
  * 当曲云上这个字段常写成「订单中心/支付模块」这种带上级前缀的形式，这里只要最后一级。
@@ -177,6 +201,66 @@ router.post("/", async (req, res) => {
     actor?: string;
     actorRole?: string;
   } & Record<string, unknown>;
+
+  // view=requirementModules：需求分析看板的导出。导的是聚合后的模块统计，
+  // 列跟工单列表完全不同，也不受列表筛选影响，所以在最前面单独分流
+  if (view === "requirementModules") {
+    if (!canAccessRequirementAnalysis(actor)) {
+      return res.status(403).json({ message: "无权限：该账号未被授权访问需求分析看板" });
+    }
+    const rawYear = (req.body as { year?: unknown }).year;
+    const year =
+      typeof rawYear === "number"
+        ? rawYear
+        : typeof rawYear === "string" && /^\d{4}$/.test(rawYear)
+        ? Number(rawYear)
+        : null;
+    const stats = computeRequirementModuleStats(store.tickets, year);
+    const scopeName = year ? `${year}年` : "整体";
+    const stamp2 = dayjs().format("YYYYMMDD_HHmm");
+    // 传了 module 就导这个模块的工单明细，否则导模块汇总表
+    const targetModule = typeof (req.body as { module?: unknown }).module === "string"
+      ? String((req.body as { module?: unknown }).module)
+      : null;
+
+    const workbook = new ExcelJS.Workbook();
+    if (targetModule) {
+      const row = stats.rows.find((r) => r.module === targetModule);
+      if (!row || row.tickets.length === 0) {
+        return res.status(400).json({ message: `当前范围内没有模块「${targetModule}」的工单明细可导出` });
+      }
+      const sheet = workbook.addWorksheet("需求明细");
+      sheet.columns = REQUIREMENT_DETAIL_COLUMNS.map((c) => ({ header: c.header, key: c.key, width: c.width }));
+      sheet.getRow(1).font = { bold: true };
+      row.tickets.forEach((d) =>
+        sheet.addRow({ ...d, expectedCompleteTime: dash(d.expectedCompleteTime), actualCompleteTime: dash(d.actualCompleteTime) })
+      );
+      attachmentHeaders(
+        res,
+        `IT二部需求明细_${targetModule}_${scopeName}_${row.tickets.length}条_${stamp2}.xlsx`,
+        false
+      );
+      const detailBuffer = await workbook.xlsx.writeBuffer();
+      return res.end(Buffer.from(detailBuffer));
+    }
+
+    if (stats.rows.length === 0) {
+      return res.status(400).json({ message: "当前范围内没有可导出的需求模块数据" });
+    }
+    const sheet = workbook.addWorksheet("需求模块分析");
+    sheet.columns = REQUIREMENT_MODULE_COLUMNS.map((c) => ({ header: c.header, key: c.key, width: c.width }));
+    sheet.getRow(1).font = { bold: true };
+    stats.rows.forEach((r) =>
+      sheet.addRow({ ...r, avgIntervalDays: r.avgIntervalDays ?? "-" })
+    );
+    attachmentHeaders(
+      res,
+      `IT二部需求模块分析_${scopeName}_${stats.rows.length}个模块_${stamp2}.xlsx`,
+      false
+    );
+    const buffer = await workbook.xlsx.writeBuffer();
+    return res.end(Buffer.from(buffer));
+  }
 
   // view=defect：缺陷跟进页的导出，分类范围与可见范围都换成缺陷那套，导出列也换成缺陷列表的列
   const isDefect = view === "defect";

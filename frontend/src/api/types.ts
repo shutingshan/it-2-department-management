@@ -20,10 +20,11 @@ export interface User {
 export type SyncPermission = "fetch-incremental" | "fetch-full" | "update" | "tapd" | "tapd-login";
 
 // 可按账号单独授权的菜单（跟后端 types.ts 的 MENU_PERMISSIONS 一一对应）
-export type MenuPermission = "defects";
+export type MenuPermission = "defects" | "requirementAnalysis";
 
 export const MENU_PERMISSIONS: { key: MenuPermission; label: string }[] = [
   { key: "defects", label: "缺陷跟进" },
+  { key: "requirementAnalysis", label: "需求分析看板" },
 ];
 
 export const SYNC_PERMISSIONS: { key: SyncPermission; label: string }[] = [

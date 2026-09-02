@@ -4,8 +4,23 @@ import { store } from "../store";
 import { Ticket } from "../types";
 import { getRootDeptId, getDeptName, getTopLevelDepartments, getChildDeptIds } from "../deptUtils";
 import { hoursDeviation } from "../types";
+import { canAccessRequirementAnalysis } from "../permissions";
+import { computeRequirementModuleStats } from "../requirementModules";
 
 const router = Router();
+
+/**
+ * 需求分析看板：按需求模块统计改动频率。
+ * year 传具体年份则只用该年的需求计算，传 all/不传表示整体。
+ */
+router.get("/requirement-modules", (req, res) => {
+  const { actor, year } = req.query as { actor?: string; year?: string };
+  if (!canAccessRequirementAnalysis(actor)) {
+    return res.status(403).json({ message: "无权限：该账号未被授权访问需求分析看板" });
+  }
+  const parsedYear = year && year !== "all" && /^\d{4}$/.test(year) ? Number(year) : null;
+  res.json({ data: computeRequirementModuleStats(store.tickets, parsedYear) });
+});
 
 function inYear(dateStr: string | null, year: number | null): boolean {
   if (year === null) return true;

@@ -31,3 +31,17 @@ export function isAdmin(actor?: string): boolean {
   if (!actor) return false;
   return store.accounts.find((a) => a.name === actor)?.role === "admin";
 }
+
+/**
+ * 能否进入需求分析看板。跟缺陷跟进同一套取舍：按账号显式授权，管理员不受限。
+ *
+ * 这个看板取的是库内全量需求数据（绕开工单中心的显示范围配置），
+ * 数据虽然是模块级聚合、不含工单明细，仍不适合默认对所有角色开放。
+ */
+export function canAccessRequirementAnalysis(actor?: string): boolean {
+  if (!actor) return false;
+  const account = store.accounts.find((a) => a.name === actor);
+  if (!account) return false;
+  if (account.role === "admin") return true;
+  return !!account.menuPermissions?.includes("requirementAnalysis");
+}

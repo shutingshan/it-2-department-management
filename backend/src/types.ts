@@ -43,10 +43,11 @@ export const SYNC_PERMISSIONS: { key: SyncPermission; label: string }[] = [
 
 // 可按账号单独授权的菜单。缺陷跟进是一块跨部门共用的看板，进去就能看到并编辑
 // 全量缺陷，谁能进由管理员在账号配置里直接勾选，不从工单数据里推断
-export type MenuPermission = "defects";
+export type MenuPermission = "defects" | "requirementAnalysis";
 
 export const MENU_PERMISSIONS: { key: MenuPermission; label: string }[] = [
   { key: "defects", label: "缺陷跟进" },
+  { key: "requirementAnalysis", label: "需求分析看板" },
 ];
 
 // 缺陷跟进左侧应用树的分组节点。一个节点对应一个显示名称 + 若干归属应用，
