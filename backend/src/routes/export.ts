@@ -4,7 +4,7 @@ import { ZipArchive } from "archiver";
 import dayjs from "dayjs";
 import { store } from "../store";
 import { applyFilters, parseQuery, scopeForActor, scopeForDefectActor } from "../filter";
-import { canAccessDefects } from "../permissions";
+import { canAccessDefects, isAdmin } from "../permissions";
 import { hoursDeviation, Ticket } from "../types";
 import { dedupe, stripCurrentIterationTag } from "../mapping";
 
@@ -140,13 +140,33 @@ function attachmentHeaders(res: import("express").Response, fileName: string, is
   res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(fileName)}"`);
 }
 
+// 「库内全量需求工单」认的分类值。当曲云的分类是固定几项（需求/数据处理/缺陷/咨询），
+// 这里只取「需求」这一项
+const REQUIREMENT_CATEGORY = "需求";
+
 /**
- * 导出工单。三种模式：
- * - scope=all       全量导出：当前筛选条件命中的全部工单，导成单个 xlsx
- * - scope=selected  导出所选：只导 ids 里勾选的工单，导成单个 xlsx
- * - 不传 scope      按人分组导出（原有逻辑）：groupBy=requester/itHandler，每人一个文件打包成 zip
+ * 「库内全量需求工单」这一个导出里对需求模块的处理：值里带「/」时，去掉「/」及其之前的内容。
+ * 当曲云上这个字段常写成「订单中心/支付模块」这种带上级前缀的形式，这里只要最后一级。
  *
- * 三种模式的表格列完全一致，都是工单中心列表的全部字段。
+ * 多级（A/B/C）按最后一个「/」切，取最末一级；同时兼容中文输入法下的全角「／」。
+ * 切完为空（例如结尾就是「/」）时退回占位符，不要导出一个空单元格。
+ * 只在这个导出模式生效，列表与其余导出模式仍是原值。
+ */
+function stripModulePrefix(v: string): string {
+  if (!v) return v;
+  const idx = Math.max(v.lastIndexOf("/"), v.lastIndexOf("／"));
+  if (idx < 0) return v;
+  return v.slice(idx + 1).trim() || "-";
+}
+
+/**
+ * 导出工单。四种模式：
+ * - scope=all              全量导出：当前筛选条件命中的全部工单，导成单个 xlsx
+ * - scope=selected         导出所选：只导 ids 里勾选的工单，导成单个 xlsx
+ * - scope=allRequirements  库内全量需求工单：见下方该分支的注释，口径跟前三种都不一样
+ * - 不传 scope             按人分组导出（原有逻辑）：groupBy=requester/itHandler，每人一个文件打包成 zip
+ *
+ * 四种模式的表格列完全一致，都是工单中心列表的全部字段。
  */
 router.post("/", async (req, res) => {
   const { groupBy, scope, view, ids, actor, actorRole, ...filters } = req.body as {
@@ -188,6 +208,35 @@ router.post("/", async (req, res) => {
     const workbook = new ExcelJS.Workbook();
     buildSheet(workbook, docName, selected, isDefect);
     attachmentHeaders(res, `${docName}_所选${selected.length}条_${stamp}.xlsx`, false);
+    const buffer = await workbook.xlsx.writeBuffer();
+    return res.end(Buffer.from(buffer));
+  }
+
+  /**
+   * 库内全量需求工单：刻意绕开工单中心的显示范围配置（分类保留 / 归属应用排除 / 状态排除）
+   * 与列表上的筛选条件，直接从整库取分类为「需求」的工单——这个入口的意义就是"拿全"，
+   * 走 visibleTickets 的话会被那几项配置削掉一部分，跟"库内全量"这个名字不符。
+   *
+   * 正因为绕开了这些收敛，这个入口仅开放给管理员。
+   */
+  if (scope === "allRequirements") {
+    // 仅管理员：这个模式绕开了显示范围配置，导的是整库数据，不能开放给其他角色。
+    // 判断走账号记录（permissions.isAdmin），不认前端传的 actorRole
+    if (!isAdmin(actor)) {
+      return res.status(403).json({ message: "权限不足：仅管理员可导出库内全量需求工单" });
+    }
+    // 已经限定管理员，直接取整库即可，无需再套 scopeForActor（管理员本就不受其限制，
+    // 再套一层反而会被前端传来的 actorRole 影响，口径变得不确定）
+    const inStore = store.tickets
+      .filter((t) => t.category?.trim() === REQUIREMENT_CATEGORY)
+      // 只改导出用的副本，不动库里的原值
+      .map((t) => ({ ...t, module: stripModulePrefix(t.module) }));
+    if (inStore.length === 0) {
+      return res.status(400).json({ message: `库内没有分类为「${REQUIREMENT_CATEGORY}」的工单可导出` });
+    }
+    const workbook = new ExcelJS.Workbook();
+    buildSheet(workbook, `${REQUIREMENT_CATEGORY}工单`, inStore);
+    attachmentHeaders(res, `IT二部工单数据_库内全量${REQUIREMENT_CATEGORY}_${inStore.length}条_${stamp}.xlsx`, false);
     const buffer = await workbook.xlsx.writeBuffer();
     return res.end(Buffer.from(buffer));
   }

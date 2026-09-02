@@ -28,6 +28,9 @@ import DraggableHeaderCell from "./DraggableHeaderCell";
 import { copyText } from "../../utils/clipboard";
 import "./TicketCenter.css";
 
+// 导出下拉里的模式。allRequirements=库内全量需求工单，不受列表筛选与显示范围配置影响
+type ExportKey = "all" | "selected" | "allRequirements" | "requester" | "itHandler";
+
 const FIXED_LEFT_KEYS = ["code", "tapdUrl", "owningApp", "module", "requester", "title"];
 const DEFAULT_MIDDLE_ORDER = [
   "content",
@@ -432,14 +435,19 @@ export default function TicketCenter() {
 
   // all=按当前筛选全量导出（单个 xlsx）；selected=只导勾选的（单个 xlsx）；
   // requester/itHandler=按人分组导出，每人一个文件打成 zip
-  async function handleExport(key: "all" | "selected" | "requester" | "itHandler") {
+  async function handleExport(key: ExportKey) {
     if (key === "selected" && selectedRowKeys.length === 0) {
       message.warning("请先在列表中勾选要导出的工单");
       return;
     }
-    const body: Record<string, unknown> = { ...filters, actor: user?.name, actorRole: user?.role };
+    // 库内全量需求工单不受列表筛选影响，索性不把筛选条件带上去，
+    // 免得看请求的人以为筛选在这个模式下也生效
+    const body: Record<string, unknown> =
+      key === "allRequirements"
+        ? { scope: key, actor: user?.name, actorRole: user?.role }
+        : { ...filters, actor: user?.name, actorRole: user?.role };
     if (key === "all" || key === "selected") body.scope = key;
-    else body.groupBy = key;
+    else if (key !== "allRequirements") body.groupBy = key;
     if (key === "selected") body.ids = selectedRowKeys;
 
     setExporting(key);
@@ -682,11 +690,18 @@ export default function TicketCenter() {
                     label: `导出所选数据${selectedRowKeys.length ? `（${selectedRowKeys.length}）` : ""}`,
                     disabled: selectedRowKeys.length === 0,
                   },
+                  // 该模式绕开显示范围配置、导的是整库数据，仅管理员可见（后端同样有校验）
+                  ...(user?.role === "admin"
+                    ? [
+                        { type: "divider" as const },
+                        { key: "allRequirements", label: "导出库内全量需求工单" },
+                      ]
+                    : []),
                   { type: "divider" },
                   { key: "requester", label: "按发起人导出" },
                   { key: "itHandler", label: "按IT受理人导出" },
                 ],
-                onClick: ({ key }) => handleExport(key as "all" | "selected" | "requester" | "itHandler"),
+                onClick: ({ key }) => handleExport(key as ExportKey),
               }}
               trigger={["click"]}
             >

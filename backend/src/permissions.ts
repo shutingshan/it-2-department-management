@@ -22,3 +22,12 @@ export function canAccessDefects(actor?: string): boolean {
   if (account.role === "admin") return true;
   return !!account.menuPermissions?.includes("defects");
 }
+
+/**
+ * 是否管理员。跟 canAccessDefects 一样只收 actor：角色一律以账号记录为准，
+ * 前端传上来的 actorRole 不能作数——那样谁传 actorRole=admin 谁就是管理员。
+ */
+export function isAdmin(actor?: string): boolean {
+  if (!actor) return false;
+  return store.accounts.find((a) => a.name === actor)?.role === "admin";
+}

@@ -5,6 +5,7 @@ import {
   resolveExpectedMonthOptions,
   validateExpectedMonthSource,
 } from "../expectedMonth";
+import { isAdmin } from "../permissions";
 import { ExpectedMonthSource } from "../types";
 
 const router = Router();
@@ -20,13 +21,6 @@ function payload() {
 router.get("/", (_req, res) => {
   res.json(payload());
 });
-
-// 角色一律以账号记录为准，不认前端传上来的 actorRole——那个值谁都能改
-// （同 permissions.canAccessDefects 的取舍）
-function isAdmin(actor?: string): boolean {
-  if (!actor) return false;
-  return store.accounts.find((a) => a.name === actor)?.role === "admin";
-}
 
 router.put("/", (req, res) => {
   const { actor, ...rest } = req.body as { actor?: string } & ExpectedMonthSource;
