@@ -126,6 +126,7 @@ export function mapScrapedRowToTicket(row: ScrapedRow, existing?: Ticket): Ticke
     spentHours: existing?.spentHours ?? null,
     // 人工维护字段，当曲云没有对应列，同步时必须保留原值
     triageHours: existing?.triageHours ?? null,
+    devHours: existing?.devHours ?? null,
     testHours: existing?.testHours ?? null,
   };
 }

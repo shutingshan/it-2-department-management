@@ -31,9 +31,8 @@ import "./TicketCenter.css";
 // 导出下拉里的模式。allRequirements=库内全量需求工单，不受列表筛选与显示范围配置影响
 type ExportKey = "all" | "selected" | "allRequirements" | "requester" | "itHandler";
 
-const FIXED_LEFT_KEYS = ["code", "tapdUrl", "owningApp", "module", "requester", "title"];
+const FIXED_LEFT_KEYS = ["code", "tapdUrl", "owningApp", "module", "requester", "title", "content"];
 const DEFAULT_MIDDLE_ORDER = [
-  "content",
   "category",
   "requesterDept",
   "watcher",
@@ -56,6 +55,7 @@ const DEFAULT_MIDDLE_ORDER = [
   "actualHours",
   "hoursDeviation",
   "triageHours",
+  "devHours",
   "testHours",
   "remark",
   "submittedAt",
@@ -301,7 +301,7 @@ function InlineHoursInput({
   onSaved,
 }: {
   ticket: Ticket;
-  field: "triageHours" | "testHours";
+  field: "triageHours" | "devHours" | "testHours";
   onSaved: () => void;
 }) {
   const { user } = useAuthStore();
@@ -722,6 +722,14 @@ export default function TicketCenter() {
         width: 100,
         render: (_: number | null, r: Ticket) => (
           <InlineHoursInput ticket={r} field="triageHours" onSaved={reload} />
+        ),
+      },
+      devHours: {
+        title: "开发工时",
+        dataIndex: "devHours",
+        width: 100,
+        render: (_: number | null, r: Ticket) => (
+          <InlineHoursInput ticket={r} field="devHours" onSaved={reload} />
         ),
       },
       testHours: {

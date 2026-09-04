@@ -204,6 +204,7 @@ export interface Ticket {
   expectedCompleteTime: string | null;
   actualCompleteTime: string | null;
   triageHours: number | null;
+  devHours: number | null;
   testHours: number | null;
   estimatedHours: number;
   actualHours: number;

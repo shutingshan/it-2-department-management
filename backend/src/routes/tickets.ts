@@ -125,6 +125,7 @@ const EDITABLE_FIELDS = [
   "completionStatus",
   "spentHours",
   "triageHours",
+  "devHours",
   "testHours",
 ] as const;
 // 仅管理员可编辑的字段。月度计划是从 TAPD 同步过来的字段，放开给管理员是为了
@@ -132,14 +133,15 @@ const EDITABLE_FIELDS = [
 const ADMIN_ONLY_FIELDS: string[] = ["monthlyPlan"];
 // 仅 IT受理人与管理员可编辑的字段。IT受理人"只能改自己负责的工单"那条限制在上面已统一处理，
 // 这里只管角色够不够
-const HANDLER_OR_ADMIN_FIELDS: string[] = ["triageHours", "testHours"];
+const HANDLER_OR_ADMIN_FIELDS: string[] = ["triageHours", "devHours", "testHours"];
 // 数组字段：接受数组或「、,，」分隔的字符串，统一清洗成去重后的字符串数组
 const ARRAY_FIELDS: string[] = ["monthlyPlan"];
 
 // 梳理/测试工时：整数小时，空表示未填写
-const INTEGER_HOUR_FIELDS: string[] = ["triageHours", "testHours"];
+const INTEGER_HOUR_FIELDS: string[] = ["triageHours", "devHours", "testHours"];
 const HOUR_FIELD_LABELS: Record<string, string> = {
   triageHours: "梳理工时",
+  devHours: "开发工时",
   testHours: "测试工时",
 };
 

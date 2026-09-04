@@ -326,6 +326,7 @@ export function genTicket(year: number, seqInYear: number, submittedAt: dayjs.Da
     completionStatus: "",
     spentHours: null,
     triageHours: null,
+    devHours: null,
     testHours: null,
   };
 }

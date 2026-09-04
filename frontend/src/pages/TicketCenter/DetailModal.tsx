@@ -25,6 +25,7 @@ export default function DetailModal({
     remark?: string;
     expectedMonth?: string | null;
     triageHours?: number | null;
+    devHours?: number | null;
     testHours?: number | null;
   }>({});
   // 需方期望月度的候选值：走后端「取值来源」配置，跟列表里那一列同源
@@ -198,6 +199,24 @@ export default function DetailModal({
                 />
               ) : (
                 ticket.triageHours ?? "-"
+              )}
+            </Descriptions.Item>
+            <Descriptions.Item label="开发工时">
+              {canEditHours ? (
+                <InputNumber
+                  size="small"
+                  min={0}
+                  step={1}
+                  precision={0}
+                  style={{ width: "100%" }}
+                  placeholder="小时"
+                  defaultValue={ticket.devHours ?? undefined}
+                  onChange={(v) =>
+                    setEdited((s) => ({ ...s, devHours: v === null || v === undefined ? null : Math.trunc(Number(v)) }))
+                  }
+                />
+              ) : (
+                ticket.devHours ?? "-"
               )}
             </Descriptions.Item>
             <Descriptions.Item label="测试工时">
