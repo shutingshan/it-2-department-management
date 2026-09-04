@@ -45,3 +45,9 @@ export function canAccessRequirementAnalysis(actor?: string): boolean {
   if (account.role === "admin") return true;
   return !!account.menuPermissions?.includes("requirementAnalysis");
 }
+
+/** 账号记录里的角色。查不到账号返回 undefined，调用方按"没权限"处理 */
+export function roleOf(actor?: string): string | undefined {
+  if (!actor) return undefined;
+  return store.accounts.find((a) => a.name === actor)?.role;
+}

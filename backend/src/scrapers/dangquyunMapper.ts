@@ -124,5 +124,8 @@ export function mapScrapedRowToTicket(row: ScrapedRow, existing?: Ticket): Ticke
     automationPlanCompleteTime: existing?.automationPlanCompleteTime ?? null,
     completionStatus: existing?.completionStatus ?? "",
     spentHours: existing?.spentHours ?? null,
+    // 人工维护字段，当曲云没有对应列，同步时必须保留原值
+    triageHours: existing?.triageHours ?? null,
+    testHours: existing?.testHours ?? null,
   };
 }

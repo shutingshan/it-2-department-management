@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Descriptions, Input, Modal, Select, Space, Table, Tag, Timeline, Typography, message } from "antd";
+import { Button, Descriptions, Input, InputNumber, Modal, Select, Space, Table, Tag, Timeline, Typography, message } from "antd";
 import { CopyOutlined, LinkOutlined } from "@ant-design/icons";
 import { api } from "../../api/client";
 import { formatIterations, hoursDeviation, STAGE_COLORS } from "../../api/types";
@@ -24,6 +24,8 @@ export default function DetailModal({
     urgent?: string;
     remark?: string;
     expectedMonth?: string | null;
+    triageHours?: number | null;
+    testHours?: number | null;
   }>({});
   // 需方期望月度的候选值：走后端「取值来源」配置，跟列表里那一列同源
   const [monthOptions, setMonthOptions] = useState<string[]>([]);
@@ -79,6 +81,9 @@ export default function DetailModal({
   const deviationClass = deviation >= 5 ? "dev-red" : deviation > 0 ? "dev-yellow" : "";
   // IT 受理人仅能编辑本人负责的工单；需求方可见的工单本身已限定为本人相关，管理员不受限
   const canEdit = !(user?.role === "it_handler" && ticket.itHandler !== user.name);
+  // 梳理/测试工时限 IT受理人与管理员；IT受理人还受上面 canEdit 的"只能改自己负责的"约束
+  const canEditHours =
+    canEdit && (user?.role === "admin" || user?.role === "it_handler");
 
   return (
     <Modal
@@ -177,6 +182,42 @@ export default function DetailModal({
             <Descriptions.Item label="实际完成时间">{ticket.actualCompleteTime ?? "-"}</Descriptions.Item>
             <Descriptions.Item label="预估工时">{ticket.estimatedHours}</Descriptions.Item>
             <Descriptions.Item label="完成工时">{ticket.actualHours}</Descriptions.Item>
+            <Descriptions.Item label="梳理工时">
+              {canEditHours ? (
+                <InputNumber
+                  size="small"
+                  min={0}
+                  step={1}
+                  precision={0}
+                  style={{ width: "100%" }}
+                  placeholder="小时"
+                  defaultValue={ticket.triageHours ?? undefined}
+                  onChange={(v) =>
+                    setEdited((s) => ({ ...s, triageHours: v === null || v === undefined ? null : Math.trunc(Number(v)) }))
+                  }
+                />
+              ) : (
+                ticket.triageHours ?? "-"
+              )}
+            </Descriptions.Item>
+            <Descriptions.Item label="测试工时">
+              {canEditHours ? (
+                <InputNumber
+                  size="small"
+                  min={0}
+                  step={1}
+                  precision={0}
+                  style={{ width: "100%" }}
+                  placeholder="小时"
+                  defaultValue={ticket.testHours ?? undefined}
+                  onChange={(v) =>
+                    setEdited((s) => ({ ...s, testHours: v === null || v === undefined ? null : Math.trunc(Number(v)) }))
+                  }
+                />
+              ) : (
+                ticket.testHours ?? "-"
+              )}
+            </Descriptions.Item>
             <Descriptions.Item label="工时偏差">
               <span className={deviationClass}>{deviation}</span>
             </Descriptions.Item>

@@ -206,6 +206,10 @@ export interface Ticket {
   actualTriageTime: string | null; // 实际梳理完成时间（当曲云）
   expectedCompleteTime: string | null; // 预计完成时间（当曲云）
   actualCompleteTime: string | null; // 实际完成时间（当曲云/TAPD）
+  // 梳理/测试工时：人工维护，当曲云与 TAPD 都没有对应字段，同步不会覆盖。
+  // 整数、单位小时；null 表示未填写（跟 0 小时区分开）
+  triageHours: number | null; // 梳理工时
+  testHours: number | null; // 测试工时
   estimatedHours: number; // 预估工时
   actualHours: number; // 实际工时
   submittedAt: string; // 提交时间

@@ -10,7 +10,7 @@ import {
   scopeForDefectActor,
   TicketQuery,
 } from "../filter";
-import { canAccessDefects } from "../permissions";
+import { canAccessDefects, roleOf } from "../permissions";
 import { MONTH_RE, resolveExpectedMonthOptions } from "../expectedMonth";
 import { dedupe, stripCurrentIterationTag } from "../mapping";
 import { computeCardStats } from "../cards";
@@ -124,14 +124,33 @@ const EDITABLE_FIELDS = [
   "automationPlanCompleteTime",
   "completionStatus",
   "spentHours",
+  "triageHours",
+  "testHours",
 ] as const;
 // 仅管理员可编辑的字段。月度计划是从 TAPD 同步过来的字段，放开给管理员是为了
 // 在 TAPD 还没维护好时能先手工补上；它仍会被下一次「获取TAPD信息」按 TAPD 的值覆盖
 const ADMIN_ONLY_FIELDS: string[] = ["monthlyPlan"];
+// 仅 IT受理人与管理员可编辑的字段。IT受理人"只能改自己负责的工单"那条限制在上面已统一处理，
+// 这里只管角色够不够
+const HANDLER_OR_ADMIN_FIELDS: string[] = ["triageHours", "testHours"];
 // 数组字段：接受数组或「、,，」分隔的字符串，统一清洗成去重后的字符串数组
 const ARRAY_FIELDS: string[] = ["monthlyPlan"];
 
+// 梳理/测试工时：整数小时，空表示未填写
+const INTEGER_HOUR_FIELDS: string[] = ["triageHours", "testHours"];
+const HOUR_FIELD_LABELS: Record<string, string> = {
+  triageHours: "梳理工时",
+  testHours: "测试工时",
+};
+
 function normalizeFieldValue(key: string, raw: unknown): unknown {
+  if (INTEGER_HOUR_FIELDS.includes(key)) {
+    if (raw === null || raw === undefined || raw === "") return null;
+    // 前端清空 InputNumber 传上来的是 null/空串，填了值则是数字；
+    // 字符串数字也接一下，避免调用方手拼请求时类型不一致
+    const n = typeof raw === "number" ? raw : Number(String(raw).trim());
+    return Number.isNaN(n) ? raw : n;
+  }
   // 期望月度清空时前端传的是空串（Select allowClear），统一归一成 null，
   // 免得落盘里同时存在 null 和 "" 两种"没填"
   if (key === "expectedMonth") {
@@ -168,6 +187,12 @@ function validateFieldValue(key: string, v: unknown): string | null {
   if (key === "expectedMonth") {
     if (v === null) return null;
     return typeof v === "string" && MONTH_RE.test(v) ? null : "需方期望月度只能是 YYYY-MM 或空";
+  }
+  if (INTEGER_HOUR_FIELDS.includes(key)) {
+    if (v === null) return null;
+    return typeof v === "number" && Number.isInteger(v) && v >= 0
+      ? null
+      : `${HOUR_FIELD_LABELS[key]}只能是 0 或正整数（单位：小时），或留空`;
   }
   if (key === "spentHours") {
     if (v === null) return null;
@@ -245,6 +270,13 @@ router.patch("/:id", (req, res) => {
     }
     if (ADMIN_ONLY_FIELDS.includes(key) && actorRole !== "admin") {
       return res.status(403).json({ message: `无权限：${key} 仅管理员可编辑` });
+    }
+    if (HANDLER_OR_ADMIN_FIELDS.includes(key)) {
+      // 角色以账号记录为准，不认前端传的 actorRole（同 permissions.ts 里写明的取舍）
+      const role = roleOf(actor);
+      if (role !== "admin" && role !== "it_handler") {
+        return res.status(403).json({ message: `无权限：${key} 仅 IT受理人与管理员可编辑` });
+      }
     }
     const normalized = normalizeFieldValue(key, (fields as any)[key]);
     const invalid = validateFieldValue(key, normalized);

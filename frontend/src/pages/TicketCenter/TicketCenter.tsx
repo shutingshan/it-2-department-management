@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Dropdown, Input, Pagination, Popconfirm, Popover, Select, Space, Table, Tag, Typography, Upload, message } from "antd";
+import { Button, Dropdown, Input, InputNumber, Pagination, Popconfirm, Popover, Select, Space, Table, Tag, Typography, Upload, message } from "antd";
 import { CopyOutlined, DeleteOutlined, ExportOutlined, ImportOutlined } from "@ant-design/icons";
 import type { ColumnsType, ColumnType } from "antd/es/table";
 import {
@@ -55,6 +55,8 @@ const DEFAULT_MIDDLE_ORDER = [
   "estimatedHours",
   "actualHours",
   "hoursDeviation",
+  "triageHours",
+  "testHours",
   "remark",
   "submittedAt",
 ];
@@ -285,6 +287,67 @@ function InlineExpectedMonthInput({
       value={ticket.expectedMonth ?? undefined}
       options={selectOptions}
       onChange={(v) => commit((v as string | undefined) ?? null)}
+    />
+  );
+}
+
+/**
+ * 梳理工时 / 测试工时：整数小时，人工维护，仅 IT受理人与管理员可编辑（后端同样校验）。
+ * 失焦即提交，跟备注那一列的交互一致；没改动就不发请求，避免留下"无变化"的处理记录。
+ */
+function InlineHoursInput({
+  ticket,
+  field,
+  onSaved,
+}: {
+  ticket: Ticket;
+  field: "triageHours" | "testHours";
+  onSaved: () => void;
+}) {
+  const { user } = useAuthStore();
+  const original = ticket[field];
+  const [value, setValue] = useState<number | null>(original);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => setValue(original), [original]);
+
+  const canEdit =
+    user?.role === "admin" ||
+    (user?.role === "it_handler" && ticket.itHandler === user.name);
+
+  if (!canEdit) return <>{original ?? "-"}</>;
+
+  async function commit() {
+    if (!user || value === original) return;
+    setSaving(true);
+    try {
+      await api.patch(`/tickets/${ticket.id}`, {
+        fields: { [field]: value },
+        actor: user.name,
+        actorRole: user.role,
+      });
+      onSaved();
+    } catch (e: any) {
+      message.error(e?.response?.data?.message ?? "工时保存失败");
+      setValue(original);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <InputNumber
+      size="small"
+      min={0}
+      step={1}
+      precision={0}
+      style={{ width: "100%" }}
+      placeholder="小时"
+      disabled={saving}
+      value={value}
+      onChange={(v) => setValue(v === null || v === undefined ? null : Math.trunc(Number(v)))}
+      onBlur={commit}
+      onPressEnter={commit}
     />
   );
 }
@@ -652,6 +715,22 @@ export default function TicketCenter() {
           const cls = d >= 5 ? "dev-red" : d > 0 ? "dev-yellow" : "";
           return <span className={cls}>{d}</span>;
         },
+      },
+      triageHours: {
+        title: "梳理工时",
+        dataIndex: "triageHours",
+        width: 100,
+        render: (_: number | null, r: Ticket) => (
+          <InlineHoursInput ticket={r} field="triageHours" onSaved={reload} />
+        ),
+      },
+      testHours: {
+        title: "测试工时",
+        dataIndex: "testHours",
+        width: 100,
+        render: (_: number | null, r: Ticket) => (
+          <InlineHoursInput ticket={r} field="testHours" onSaved={reload} />
+        ),
       },
       remark: {
         title: "备注",

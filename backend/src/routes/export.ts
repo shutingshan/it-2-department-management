@@ -42,6 +42,8 @@ const COLUMNS: { header: string; key: string; width: number }[] = [
   { header: "预估工时", key: "estimatedHours", width: 10 },
   { header: "完成工时", key: "actualHours", width: 10 },
   { header: "工时偏差", key: "hoursDeviation", width: 10 },
+  { header: "梳理工时", key: "triageHours", width: 10 },
+  { header: "测试工时", key: "testHours", width: 10 },
   { header: "备注", key: "remark", width: 20 },
   { header: "提交时间", key: "submittedAt", width: 18 },
 ];
@@ -123,6 +125,8 @@ function toRow(t: Ticket) {
     estimatedHours: t.estimatedHours,
     actualHours: t.actualHours,
     hoursDeviation: hoursDeviation(t),
+    triageHours: t.triageHours ?? "-",
+    testHours: t.testHours ?? "-",
     remark: dash(t.remark),
     submittedAt: t.submittedAt,
   };

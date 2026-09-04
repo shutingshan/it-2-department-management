@@ -108,6 +108,8 @@ class Store {
         completionStatus: t.completionStatus ?? "",
         expectedMonth: t.expectedMonth ?? null,
         spentHours: t.spentHours ?? null,
+        triageHours: t.triageHours ?? null,
+        testHours: t.testHours ?? null,
       }));
       this.messages = parsed.messages ?? [];
       this.logs = parsed.logs ?? [];
