@@ -31,7 +31,9 @@ const app = express();
 app.set("query parser", "extended");
 const PORT = process.env.PORT ?? 4000;
 
-app.use(cors());
+// exposedHeaders：默认情况下浏览器读不到自定义响应头，
+// 「导入匹配状态」要靠它把匹配/未匹配条数回显到页面上
+app.use(cors({ exposedHeaders: ["Content-Disposition", "X-Match-Total", "X-Match-Matched", "X-Match-Unmatched"] }));
 app.use(morgan("dev"));
 app.use(express.json());
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Dropdown, Input, Pagination, Popconfirm, Popover, Select, Space, Table, Tag, Typography, message } from "antd";
-import { CopyOutlined, DeleteOutlined, ExportOutlined } from "@ant-design/icons";
+import { Button, Dropdown, Input, Pagination, Popconfirm, Popover, Select, Space, Table, Tag, Typography, Upload, message } from "antd";
+import { CopyOutlined, DeleteOutlined, ExportOutlined, ImportOutlined } from "@ant-design/icons";
 import type { ColumnsType, ColumnType } from "antd/es/table";
 import {
   DndContext,
@@ -340,6 +340,7 @@ export default function TicketCenter() {
   const [deleting, setDeleting] = useState(false);
   // 正在导出的菜单项 key，用于给「导出」按钮加 loading，避免大数据量时以为没点上而重复点
   const [exporting, setExporting] = useState<string | null>(null);
+  const [matching, setMatching] = useState(false);
 
   // 表格高度不能写死：统计卡片、筛选栏（选中条件多时会换行）的高度都是变的。
   // 这里实测表格容器剩余的可用高度，减掉表头后作为表体的滚动高度，
@@ -435,6 +436,47 @@ export default function TicketCenter() {
 
   // all=按当前筛选全量导出（单个 xlsx）；selected=只导勾选的（单个 xlsx）；
   // requester/itHandler=按人分组导出，每人一个文件打成 zip
+  /**
+   * 导入一份带工单编号的表格，由后端按编号回填「状态」列后原样导回。
+   * 文件直接以二进制发上去（后端用 express.raw 接），不走 multipart，省掉一个上传中间件。
+   */
+  async function handleMatchStatus(file: File) {
+    setMatching(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const res = await api.post("/export/match-status", buffer, {
+        params: { actor: user?.name, actorRole: user?.role },
+        headers: { "Content-Type": "application/octet-stream" },
+        responseType: "blob",
+      });
+      const disposition = res.headers["content-disposition"] as string | undefined;
+      const matched = disposition?.match(/filename="?([^";]+)"?/);
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = matched ? decodeURIComponent(matched[1]) : "工单状态匹配结果.xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+      const ok = res.headers["x-match-matched"];
+      const fail = res.headers["x-match-unmatched"];
+      message.success(
+        ok === undefined ? "匹配完成，已导出结果" : `匹配完成：匹配上 ${ok} 条，未匹配 ${fail} 条，已导出结果`
+      );
+    } catch (e: any) {
+      // responseType 是 blob，报错信息也是 blob，要读出来才拿得到后端的提示文案
+      let msg = "匹配失败";
+      try {
+        const text = await (e?.response?.data as Blob)?.text?.();
+        msg = text ? JSON.parse(text).message ?? msg : msg;
+      } catch {
+        // 解析不出来就用兜底文案
+      }
+      message.error(msg);
+    } finally {
+      setMatching(false);
+    }
+  }
+
   async function handleExport(key: ExportKey) {
     if (key === "selected" && selectedRowKeys.length === 0) {
       message.warning("请先在列表中勾选要导出的工单");
@@ -709,6 +751,19 @@ export default function TicketCenter() {
                 导出
               </Button>
             </Dropdown>
+            <Upload
+              accept=".xlsx"
+              showUploadList={false}
+              // 不走 antd 自带上传，交给 handleMatchStatus 直接发二进制
+              beforeUpload={(file) => {
+                handleMatchStatus(file as unknown as File);
+                return false;
+              }}
+            >
+              <Button size="small" icon={<ImportOutlined />} loading={matching}>
+                导入匹配状态
+              </Button>
+            </Upload>
             {user?.role === "admin" && selectedRowKeys.length > 0 && (
               <Popconfirm
                 title={`确认删除选中的 ${selectedRowKeys.length} 条工单？`}
