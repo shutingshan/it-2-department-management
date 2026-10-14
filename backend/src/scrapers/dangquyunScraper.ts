@@ -217,6 +217,8 @@ interface HarvestResult {
     hScroller: string;
     scrollMode: string;
     columnIdUsable: boolean;
+    expectedRows: number;
+    rowKeyCount: number;
   };
 }
 
@@ -237,26 +239,31 @@ interface HarvestResult {
  */
 async function harvestVirtualGrid(
   target: Locatable,
-  cellSelector: string
+  cellSelector: string,
+  expectedRows: number
 ): Promise<HarvestResult | null> {
   return target.evaluate(
-    async ({ cellSelector, headerSelector, settleMs, timeoutMs }) => {
+    async ({ cellSelector, headerSelector, settleMs, timeoutMs, expectedRows }) => {
       const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
       const deadline = Date.now() + timeoutMs;
 
-      // 往上找真正能滚动的祖先元素。先认 overflow 是 auto/scroll 的，
-      // 找不到再退一步认"内容比可视区大"的——有的虚拟表格外层写的是 overflow:hidden
+      // 往上找真正能滚动的祖先元素。先认 overflow 是 auto/scroll 的，找不到再退一步认
+      // overflow:hidden 但内容溢出的——有的虚拟表格外层就写的 hidden。
+      // 必须排除零尺寸的占位元素：当曲云里有个 tuilib-w-0 tuilib-h-0 的空容器，
+      // 它 scrollHeight>clientHeight 永远成立（0 比什么都小），会被误判成滚动容器，
+      // 于是"一屏"算出来只有几十像素，滚两下没新行就被当成到底了
       const findScroller = (start: Element | null, axis: "x" | "y"): HTMLElement | null => {
         let fallback: HTMLElement | null = null;
         let el = start as HTMLElement | null;
         while (el && el !== document.body) {
           const style = getComputedStyle(el);
           const overflow = axis === "y" ? style.overflowY : style.overflowX;
+          const viewport = axis === "y" ? el.clientHeight : el.clientWidth;
           const overflowing =
             axis === "y"
               ? el.scrollHeight > el.clientHeight + 4
               : el.scrollWidth > el.clientWidth + 4;
-          if (overflowing) {
+          if (overflowing && viewport >= 40 && overflow !== "visible") {
             if (overflow === "auto" || overflow === "scroll") return el;
             if (!fallback) fallback = el;
           }
@@ -356,6 +363,12 @@ async function harvestVirtualGrid(
         });
       };
 
+      const distinctRowKeys = (): number => {
+        const keys = new Set<string>();
+        for (const cell of cellData.values()) keys.add(cell.rowKey);
+        return keys.size;
+      };
+
       const posOf = (axis: "x" | "y"): number => {
         const scroller = axis === "y" ? vScroller : hScroller;
         if (!scroller) return 0;
@@ -414,8 +427,18 @@ async function harvestVirtualGrid(
 
       // 采集是"推进式"而不是"按滚动条几何算步数"的：每推一屏看累加表有没有长出新东西，
       // 连续几屏没有新内容才算到头。这样不管表格是真滚动条还是 wheel 平移都能收敛
-      const vStep = () => (vScroller ? Math.max(40, vScroller.clientHeight - 80) : 400);
-      const hStep = () => (hScroller ? Math.max(80, hScroller.clientWidth - 80) : 400);
+      // 一屏推进多少：优先用网格本身的可视尺寸，没有就退回窗口尺寸。
+      // 不直接用滚动容器的 clientHeight——wheel 模式下滚动容器可能压根不是那个可视元素
+      const gridBox = (
+        (firstCell as HTMLElement).closest('[class*="gridWindowContainer"], [class*="gridVirtual"]') ??
+        (firstCell as HTMLElement).parentElement ??
+        document.body
+      ).getBoundingClientRect();
+      const gridHeight = gridBox.height > 80 ? gridBox.height : window.innerHeight;
+      const gridWidth = gridBox.width > 80 ? gridBox.width : window.innerWidth;
+      // 留 40% 重叠：wheel 不一定按 deltaY 等量平移，步子迈太大会整屏漏行
+      const vStep = () => Math.max(120, Math.round(gridHeight * 0.6));
+      const hStep = () => Math.max(120, Math.round(gridWidth * 0.6));
 
       let reachedBottom = true;
       await resetAxis("x");
@@ -425,13 +448,19 @@ async function harvestVirtualGrid(
 
         let settled = false;
         let stagnant = 0;
-        for (let guard = 0; guard < 400; guard++) {
+        for (let guard = 0; guard < 600; guard++) {
           if (Date.now() > deadline) break;
+          // 知道本页应该有多少行时就按它收敛，这比"连续几屏没新内容"可靠得多
+          if (expectedRows > 0 && distinctRowKeys() >= expectedRows) {
+            settled = true;
+            break;
+          }
           const before = cellData.size;
           await advance("y", vStep());
           if (cellData.size === before) {
             stagnant += 1;
-            if (stagnant >= 3) {
+            // wheel 平移常有惯性/节流，一两屏没长出新内容很正常，阈值给宽一点
+            if (stagnant >= 8) {
               settled = true;
               break;
             }
@@ -474,11 +503,48 @@ async function harvestVirtualGrid(
           hScroller: hScroller ? `${hScroller.className || hScroller.tagName}` : "未找到",
           scrollMode: `纵向=${mode.y ?? "未动"} 横向=${mode.x ?? "未动"}`,
           columnIdUsable: idsUsable,
+          expectedRows,
+          rowKeyCount: distinctRowKeys(),
         },
       };
     },
-    { cellSelector, headerSelector: HEADER_SELECTOR, settleMs: GRID_SETTLE_MS, timeoutMs: GRID_HARVEST_TIMEOUT_MS }
+    {
+      cellSelector,
+      headerSelector: HEADER_SELECTOR,
+      settleMs: GRID_SETTLE_MS,
+      timeoutMs: GRID_HARVEST_TIMEOUT_MS,
+      expectedRows,
+    }
   );
+}
+
+/**
+ * 本页应该有多少行：分页器上写着"200 条/页"和"共 2,288 条记录"，当前页码一乘就知道。
+ * 读不出来就返回 0，调用方退回"连续几屏没新内容才算到底"的判断。
+ */
+async function readExpectedRowCount(target: Locatable): Promise<number> {
+  const text = await target
+    .locator(".ant-pagination")
+    .first()
+    .textContent()
+    .catch(() => null);
+  if (!text) return 0;
+  const pageSize = Number(text.match(/(\d+)\s*条\s*\/\s*页/)?.[1] ?? 0);
+  if (!pageSize) return 0;
+  const total = Number((text.match(/共\s*([\d,]+)\s*条/)?.[1] ?? "").replace(/,/g, ""));
+  const current = Number(
+    (await target
+      .locator(".ant-pagination-item-active")
+      .first()
+      .textContent()
+      .catch(() => null)) ?? 0
+  );
+  // 末页不足一页：按总数算出剩余条数，否则会一直等不到 pageSize 行而白白耗到超时
+  if (total > 0 && current > 0) {
+    const remaining = total - (current - 1) * pageSize;
+    if (remaining > 0) return Math.min(pageSize, remaining);
+  }
+  return pageSize;
 }
 
 async function extractFromVirtualGrid(
@@ -488,7 +554,10 @@ async function extractFromVirtualGrid(
   const cellSelector = "[data-gridrowkey]";
   if ((await target.locator(cellSelector).count()) === 0) return null;
 
-  const harvested = await harvestVirtualGrid(target, cellSelector);
+  // 本页应该有多少行：分页器上的"每页条数"与总条数一算就知道。
+  // 有了这个目标值，滚动采集就能按"采够了没有"收敛，而不是赌"连续几屏没新内容"
+  const expectedRows = await readExpectedRowCount(target);
+  const harvested = await harvestVirtualGrid(target, cellSelector, expectedRows);
   if (!harvested || harvested.cells.length === 0) return null;
 
   if (!harvested.reachedBottom && stat) {
@@ -511,7 +580,8 @@ async function extractFromVirtualGrid(
   }
   console.log(
     `[dangquyun] 本页采集完成：${rows.length} 行 × ${harvested.headers.length} 列表头` +
-      `（滚动容器 纵=${harvested.diagnostics.vScroller} 横=${harvested.diagnostics.hScroller}；` +
+      `（本页目标 ${harvested.diagnostics.expectedRows || "未知"} 行，采到 ${harvested.diagnostics.rowKeyCount} 个行id；` +
+      `滚动容器 纵=${harvested.diagnostics.vScroller} 横=${harvested.diagnostics.hScroller}；` +
       `${harvested.diagnostics.scrollMode}；列id可用=${harvested.diagnostics.columnIdUsable}）`
   );
   return rows;
