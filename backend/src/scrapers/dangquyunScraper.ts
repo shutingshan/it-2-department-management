@@ -108,23 +108,58 @@ function isUiOnlyColumn(nodeId: string): boolean {
   return nodeId.includes("selection") || nodeId.includes("serial");
 }
 
-/** 从页面上取回来的单元格原始信息（见 extractFromVirtualGrid 的 evaluateAll） */
+/** 从页面上采到的单元格（见 harvestVirtualGrid） */
 export interface GridCell {
   rowKey: string;
   nodeId: string;
+  /** 列的画布横坐标：已经把横向滚动和左侧冻结列的差异抹平，同一列跨屏采到的值相同 */
   left: number;
+  /** 行的画布纵坐标：已经把纵向滚动抹平，只用来决定行与行之间的先后顺序 */
   top: number;
+  text: string;
+}
+
+/** 表头文字及其所在列。key 取表头上的 data-nodeid/_nk，用来跟单元格的 data-nodeid 对齐 */
+export interface GridHeader {
+  key: string;
+  left: number;
   text: string;
 }
 
 /**
  * 把扁平的单元格还原成行：按 rowKey 分组、行间按 top 排序、行内按 left 排成列，再跟表头对齐。
+ * 列名优先按列 id（单元格 data-nodeid ↔ 表头 data-nodeid/_nk）匹配，匹配不上再按横坐标就近匹配；
+ * 都对不上才退化成占位列名。占位名用横坐标而不是序号，避免某一列没采到时后面所有列名整体错位。
  * 抽成纯函数是为了不起浏览器也能验证这段最容易出错的逻辑。
  */
 export function buildRowsFromGridCells(
   cells: GridCell[],
-  headers: string[]
+  headers: GridHeader[]
 ): { rows: ScrapedRow[]; headerMismatch: number } {
+  const headerByKey = new Map<string, string>();
+  for (const h of headers) {
+    if (h.key && h.text) headerByKey.set(h.key, h.text);
+  }
+  const positioned = headers.filter((h) => h.text);
+
+  // 就近匹配的容差：同一列的表头与单元格左边缘理论上完全对齐，留几像素容忍亚像素误差；
+  // 放太宽会把相邻列错配成同一个表头
+  const X_TOLERANCE = 6;
+  const headerFor = (cell: GridCell): string | null => {
+    const byKey = cell.nodeId ? headerByKey.get(cell.nodeId) : undefined;
+    if (byKey) return byKey;
+    let best: GridHeader | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const h of positioned) {
+      const distance = Math.abs(h.left - cell.left);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = h;
+      }
+    }
+    return best && bestDistance <= X_TOLERANCE ? best.text : null;
+  };
+
   const byRow = new Map<string, GridCell[]>();
   for (const cell of cells) {
     if (!cell.rowKey || isUiOnlyColumn(cell.nodeId)) continue;
@@ -133,13 +168,13 @@ export function buildRowsFromGridCells(
     else byRow.set(cell.rowKey, [cell]);
   }
 
+  const dataHeaderCount = headers.filter((h) => h.text && !isUiOnlyColumn(h.key)).length;
   const rows: ScrapedRow[] = [];
   let headerMismatch = 0;
   // 行间顺序按 top；同一行的单元格 top 相同，取第一个即可
   const ordered = Array.from(byRow.values()).sort((a, b) => a[0].top - b[0].top);
   for (const rowCells of ordered) {
-    // 固定列与滚动列可能分属两个容器、left 各自从 0 起算，同一行里会出现重复 left；
-    // 先按 nodeId 去重，保证一列只取一个单元格
+    // 同一列可能在横向滚动的重叠区被采到两次，按列 id 去重保证一列只取一个单元格。
     // 必须单次遍历去重：filter + map 两段写法里 filter 会先整轮跑完，
     // 那时 seen 还是空的，等于没去重
     const seen = new Set<string>();
@@ -153,28 +188,222 @@ export function buildRowsFromGridCells(
     }
     sorted.sort((a, b) => a.left - b.left);
     if (sorted.length === 0) continue;
-    if (headers.length > 0 && sorted.length !== headers.length) headerMismatch += 1;
+    if (dataHeaderCount > 0 && sorted.length !== dataHeaderCount) headerMismatch += 1;
 
     const row: ScrapedRow = {};
-    sorted.forEach((c, idx) => {
-      row[headers[idx] || `col${idx}`] = c.text;
-    });
+    for (const cell of sorted) {
+      row[headerFor(cell) ?? `col@${Math.round(cell.left)}`] = cell.text;
+    }
     rows.push(row);
   }
   return { rows, headerMismatch };
 }
 
+// 采集一屏后等待下一屏渲染出来的时间。虚拟网格是同步渲染的，不需要等接口，
+// 给一帧多一点即可；太长会让 12 页 × 几十屏的总耗时迅速膨胀
+const GRID_SETTLE_MS = 150;
+// 单页采集的总时间上限，防止滚动条因为页面异常一直滚不到底时无限循环
+const GRID_HARVEST_TIMEOUT_MS = 120000;
+
+/** harvestVirtualGrid 的返回值 */
+interface HarvestResult {
+  cells: GridCell[];
+  headers: GridHeader[];
+  /** 纵向是不是真的滚到了底。false 表示本页可能没采全 */
+  reachedBottom: boolean;
+}
+
 /**
- * 当曲云新版表格（lumi 虚拟网格）：DOM 里**没有行元素**。
- * 每个单元格都是扁平的绝对定位 div，靠属性标明归属：
+ * 当曲云新版表格（lumi 虚拟网格）：DOM 里**没有行元素**，每个单元格都是扁平的绝对定位 div，
+ * 靠属性标明归属：
  *   data-gridrowkey="<行id>"   同一行的单元格共用
  *   data-nodeid="<列id>"       列标识；勾选列是 lumi_table_selection_key
- *   style.left                 决定它在第几列（视觉顺序）
- *   style.top                  决定它在第几行（视觉顺序）
  *
- * 所以这里按 gridrowkey 分组成行、按 left 排成列，再跟表头按序对齐。
- * 旧版那套 data-row-item / data-columnitem 的嵌套结构见 extractFromLegacyGrid。
+ * 关键是它**双向虚拟化**：一页 200 条但同一时刻只渲染视口内的十几行，25 列也只渲染可视的
+ * 七八列，滚过去的行/列会被直接从 DOM 里回收。所以「先滚到底、再统一抓一次」是抓不全的——
+ * 滚到底时顶部的行早被回收，DOM 里永远只有十几行十几列（这正是之前每页只抓到 14 行、
+ * 导致「配置的校验工单编号未出现在抓取结果里」误报的原因）。
+ *
+ * 这里改成**边滚边采**：横向逐屏滚过去，每个横向位置再纵向逐屏滚到底，每滚一屏就把当前
+ * 渲染出来的单元格并进累加表，按 (行id, 列id) 去重。整段放在页面里跑：一页 200×25 = 5000
+ * 个单元格，逐个 locator 往返会非常慢。
  */
+async function harvestVirtualGrid(
+  target: Locatable,
+  cellSelector: string
+): Promise<HarvestResult | null> {
+  return target.evaluate(
+    async ({ cellSelector, headerSelector, settleMs, timeoutMs }) => {
+      const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+      const deadline = Date.now() + timeoutMs;
+
+      // 往上找真正带滚动条的祖先元素。网格的横向/纵向滚动容器不一定是同一个
+      const findScroller = (start: Element | null, axis: "x" | "y"): HTMLElement | null => {
+        let el = start as HTMLElement | null;
+        while (el && el !== document.body) {
+          const style = getComputedStyle(el);
+          const overflow = axis === "y" ? style.overflowY : style.overflowX;
+          const overflowing =
+            axis === "y"
+              ? el.scrollHeight > el.clientHeight + 4
+              : el.scrollWidth > el.clientWidth + 4;
+          if ((overflow === "auto" || overflow === "scroll") && overflowing) return el;
+          el = el.parentElement;
+        }
+        return null;
+      };
+
+      const firstCell = document.querySelector(cellSelector);
+      if (!firstCell) return null;
+      const vScroller = findScroller(firstCell, "y");
+      const hScroller = findScroller(firstCell, "x");
+
+      // 左侧冻结列不随横向滚动移动，它的屏幕坐标本身就是稳定的列坐标；
+      // 普通列的屏幕坐标会随 scrollLeft 变，要加回 scrollLeft 才能跨屏对齐成同一个值。
+      // 哪些是冻结列不靠 class 猜，靠实测：同一列在两个不同 scrollLeft 下屏幕坐标没变的就是。
+      // 冻结与否要等整轮采完才能判定，所以这里只记录原始样本，最后再统一换算。
+      interface XSample {
+        minScrollLeft: number;
+        xAtMin: number;
+        maxScrollLeft: number;
+        xAtMax: number;
+      }
+      const sampleX = (store: Map<string, XSample>, key: string, x: number, scrollLeft: number) => {
+        const prev = store.get(key);
+        if (!prev) {
+          store.set(key, { minScrollLeft: scrollLeft, xAtMin: x, maxScrollLeft: scrollLeft, xAtMax: x });
+          return;
+        }
+        if (scrollLeft < prev.minScrollLeft) {
+          prev.minScrollLeft = scrollLeft;
+          prev.xAtMin = x;
+        }
+        if (scrollLeft > prev.maxScrollLeft) {
+          prev.maxScrollLeft = scrollLeft;
+          prev.xAtMax = x;
+        }
+      };
+      const resolveX = (sample: XSample): number => {
+        const moved = sample.maxScrollLeft > sample.minScrollLeft;
+        const frozen = moved && Math.abs(sample.xAtMax - sample.xAtMin) < 2;
+        return frozen ? sample.xAtMin : sample.xAtMin + sample.minScrollLeft;
+      };
+
+      // 表头的列 id 不一定挂在文字节点本身上，往上找几层
+      const attrFromSelfOrAncestor = (start: Element, names: string[]): string => {
+        let el: Element | null = start;
+        for (let depth = 0; el && depth < 6; depth++, el = el.parentElement) {
+          for (const name of names) {
+            const value = el.getAttribute(name);
+            if (value) return value;
+          }
+        }
+        return "";
+      };
+
+      const cellX = new Map<string, XSample>();
+      const headerX = new Map<string, XSample>();
+      const cellData = new Map<string, { rowKey: string; colKey: string; nodeId: string; top: number; text: string }>();
+      const headerText = new Map<string, string>();
+
+      const snapshot = () => {
+        const scrollLeft = hScroller ? hScroller.scrollLeft : 0;
+        const scrollTop = vScroller ? vScroller.scrollTop : 0;
+
+        document.querySelectorAll(cellSelector).forEach((node) => {
+          const el = node as HTMLElement;
+          const rowKey = el.getAttribute("data-gridrowkey") ?? "";
+          if (!rowKey) return;
+          const rect = el.getBoundingClientRect();
+          if (rect.width === 0 && rect.height === 0) return;
+          const nodeId = el.getAttribute("data-nodeid") ?? "";
+          const colKey = nodeId || `x${Math.round(rect.left + scrollLeft)}`;
+          sampleX(cellX, colKey, rect.left, scrollLeft);
+          const text = (el.innerText || el.textContent || "").trim();
+          const key = `${rowKey}\u0000${colKey}`;
+          const prev = cellData.get(key);
+          // 同一个单元格会在横向/纵向重叠区被采到多次：已经采到过文字就别被渲染中途的空白覆盖
+          if (prev && !text) return;
+          cellData.set(key, { rowKey, colKey, nodeId, top: rect.top + scrollTop, text });
+        });
+
+        document.querySelectorAll(headerSelector).forEach((node) => {
+          const el = node as HTMLElement;
+          const text = (el.innerText || el.textContent || "").trim();
+          if (!text) return;
+          const rect = (el.closest('[class*="columnItemHeaderTitle"]') ?? el).getBoundingClientRect();
+          if (rect.width === 0 && rect.height === 0) return;
+          const key = attrFromSelfOrAncestor(el, ["data-nodeid", "_nk"]) || `x${Math.round(rect.left + scrollLeft)}`;
+          sampleX(headerX, key, rect.left, scrollLeft);
+          headerText.set(key, text);
+        });
+      };
+
+      // 纵向逐屏滚到底，每屏采一次。留一行左右的重叠，避免正好卡在交界的行两边都没采到
+      const sweepVertically = (): Promise<boolean> => {
+        if (!vScroller) {
+          snapshot();
+          return Promise.resolve(true);
+        }
+        const step = Math.max(40, vScroller.clientHeight - 80);
+        return (async () => {
+          vScroller.scrollTop = 0;
+          await sleep(settleMs);
+          snapshot();
+          for (let guard = 0; guard < 500; guard++) {
+            if (Date.now() > deadline) return false;
+            if (vScroller.scrollTop + vScroller.clientHeight >= vScroller.scrollHeight - 2) return true;
+            const before = vScroller.scrollTop;
+            vScroller.scrollTop = before + step;
+            await sleep(settleMs);
+            snapshot();
+            if (vScroller.scrollTop <= before) return true; // 已经滚不动了
+          }
+          return false;
+        })();
+      };
+
+      let reachedBottom = true;
+      if (!hScroller) {
+        reachedBottom = await sweepVertically();
+      } else {
+        const maxLeft = hScroller.scrollWidth - hScroller.clientWidth;
+        // 同样留一点重叠，避免正好卡在交界的列两边都没采到
+        const step = Math.max(80, hScroller.clientWidth - 80);
+        const stops: number[] = [];
+        for (let x = 0; x < maxLeft; x += step) stops.push(x);
+        stops.push(maxLeft);
+        for (const x of stops) {
+          if (Date.now() > deadline) {
+            reachedBottom = false;
+            break;
+          }
+          hScroller.scrollLeft = x;
+          await sleep(settleMs);
+          if (!(await sweepVertically())) reachedBottom = false;
+        }
+        hScroller.scrollLeft = 0;
+      }
+
+      const cells = Array.from(cellData.values()).map((c) => ({
+        rowKey: c.rowKey,
+        nodeId: c.nodeId,
+        left: resolveX(cellX.get(c.colKey)!),
+        top: c.top,
+        text: c.text,
+      }));
+      const headers = Array.from(headerText.entries()).map(([key, text]) => ({
+        // 占位 key（x123）是坐标不是列 id，不能拿去跟单元格的 data-nodeid 匹配
+        key: key.startsWith("x") && !Number.isNaN(Number(key.slice(1))) ? "" : key,
+        left: resolveX(headerX.get(key)!),
+        text,
+      }));
+      return { cells, headers, reachedBottom };
+    },
+    { cellSelector, headerSelector: HEADER_SELECTOR, settleMs: GRID_SETTLE_MS, timeoutMs: GRID_HARVEST_TIMEOUT_MS }
+  );
+}
+
 async function extractFromVirtualGrid(
   target: Locatable,
   stat?: ScrollStat
@@ -182,43 +411,28 @@ async function extractFromVirtualGrid(
   const cellSelector = "[data-gridrowkey]";
   if ((await target.locator(cellSelector).count()) === 0) return null;
 
-  // 虚拟滚动：一页 200 条但 DOM 只渲染视口内的十几行，必须滚到底部把本页全部加载出来
-  const scrolled = await scrollGridToLoadAll(target, cellSelector);
-  if (!scrolled.stabilized && stat) {
+  const harvested = await harvestVirtualGrid(target, cellSelector);
+  if (!harvested || harvested.cells.length === 0) return null;
+
+  if (!harvested.reachedBottom && stat) {
     stat.incomplete = true;
     console.warn(
-      `[dangquyun] 本页滚动加载超时，已渲染 ${scrolled.count} 个单元格但未确认是否已全部加载，本次抓取结果可能不完整`
+      `[dangquyun] 本页滚动采集超时，已采到 ${harvested.cells.length} 个单元格但未滚到底，本次抓取结果可能不完整`
     );
   }
 
-  // 一次性把所有单元格的归属与位置取回来，避免逐个 locator 往返（一页上千个单元格会非常慢）
-  const cells = await target.locator(cellSelector).evaluateAll((els) =>
-    els.map((el) => {
-      const h = el as HTMLElement;
-      return {
-        rowKey: h.getAttribute("data-gridrowkey") ?? "",
-        nodeId: h.getAttribute("data-nodeid") ?? "",
-        left: Number.parseFloat(h.style.left || "0") || 0,
-        top: Number.parseFloat(h.style.top || "0") || 0,
-        text: (h.innerText || h.textContent || "").trim(),
-      };
-    })
-  );
-  if (cells.length === 0) return null;
-
-  const headers = (await target.locator(HEADER_SELECTOR).allTextContents()).map((h) => h.trim());
-
-  const { rows, headerMismatch } = buildRowsFromGridCells(cells, headers);
+  const { rows, headerMismatch } = buildRowsFromGridCells(harvested.cells, harvested.headers);
   if (rows.length === 0) return null;
 
   if (headerMismatch > 0) {
-    // 列数对不上时字段会错位，必须说清楚，否则会悄悄落一批列名是 col3/col4 的脏数据
+    // 列数对不上时可能有字段没采到，必须说清楚，否则会悄悄落一批列名是 col@123 的脏数据
     console.warn(
-      `[dangquyun] 有 ${headerMismatch}/${rows.length} 行的单元格数与表头数（${headers.length}）不一致，` +
-        "对应列会退化成 col0/col1 这类占位列名，字段映射可能错位"
+      `[dangquyun] 有 ${headerMismatch}/${rows.length} 行的列数与表头数（${harvested.headers.length}）不一致，` +
+        "对不上表头的列会退化成 col@横坐标 这类占位列名"
     );
   }
-  return rows.length > 0 ? rows : null;
+  console.log(`[dangquyun] 本页采集完成：${rows.length} 行 × ${harvested.headers.length} 列表头`);
+  return rows;
 }
 
 // 当曲云旧版表格结构：每一行用 data-row-item="true" 标记、每个单元格用 data-columnitem 标记。

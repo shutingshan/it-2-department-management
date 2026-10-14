@@ -91,15 +91,28 @@ router.get("/status", (req, res) => {
 // 自动挑选走 visibleTickets 而不是全量：分类范围/归属应用排除之外的工单在工单中心
 // 根本看不到，拿它做验证，一旦失败使用者在页面上都找不到那条工单，无从判断真假。
 // 一条可用的验证工单都没有时（没配置且显示范围内没有已完成工单）跳过校验
-export function verifyScrapedRowsAgainstCompletedTicket(rows: ScrapedRow[]) {
+export function verifyScrapedRowsAgainstCompletedTicket(
+  rows: ScrapedRow[],
+  context: { pageCount?: number; scrollIncomplete?: boolean } = {}
+) {
   const scrapedCodes = new Set(rows.map((r) => r["编号"]?.trim()).filter(Boolean));
+
+  // 核验失败时最常见的两种原因：一是数据来源真的不对（这正是这道校验要拦的），
+  // 二是这次压根没抓全（当曲云是虚拟滚动表格，滚动采集没跑完就只有前面几十条）。
+  // 两者的处理方式完全不同，所以把抓取规模一并报出来，让使用者一眼能分辨：
+  // 明明在当曲云列表里能搜到这个编号，但这里只抓到几百条，那就是没抓全而不是数据源不对
+  const scale =
+    `本次共抓到 ${rows.length} 条（${context.pageCount ?? "?"} 页）` +
+    (context.scrollIncomplete ? "，且有页面未滚动到底、数据可能不完整" : "");
 
   const configuredCodes = store.verifyTicketCodes.map((i) => i.value);
   if (configuredCodes.length) {
     const missing = configuredCodes.filter((code) => !scrapedCodes.has(code));
     if (missing.length) {
       throw new Error(
-        `当前工单列表与要求列表不符。配置的校验工单编号未出现在抓取结果里：${missing.join("、")}`
+        `当前工单列表与要求列表不符。配置的校验工单编号未出现在抓取结果里：${missing.join("、")}。` +
+          `${scale}。若这些编号在当曲云列表里确实存在，多半是本次没抓全，` +
+          `或者被当曲云列表自身的筛选条件挡掉了`
       );
     }
     return;
@@ -113,7 +126,9 @@ export function verifyScrapedRowsAgainstCompletedTicket(rows: ScrapedRow[]) {
   )[0];
 
   if (!scrapedCodes.has(verificationTicket.code)) {
-    throw new Error(`当前工单列表与要求列表不符。工单验证编号：${verificationTicket.code}`);
+    throw new Error(
+      `当前工单列表与要求列表不符。工单验证编号：${verificationTicket.code}。${scale}`
+    );
   }
 }
 
@@ -225,7 +240,10 @@ export async function runFetchNew(actor: string, mode?: "incremental" | "full") 
     }
     // 核验必须在按受理人过滤之前做：用于核验的那条已完成工单不一定属于配置里的受理人，
     // 先过滤会把它滤掉，导致核验必然失败
-    verifyScrapedRowsAgainstCompletedTicket(result.rows);
+    verifyScrapedRowsAgainstCompletedTicket(result.rows, {
+      pageCount: result.pageCount,
+      scrollIncomplete: result.scrollIncomplete,
+    });
     const scopedRows = applyHandlerScope(result.rows);
     const { addedCount, updatedCount, failedCount, failReasons } = applyScrapedRows(scopedRows, isFull);
 
@@ -352,7 +370,10 @@ export function startUpdateTicketsJob(actor: string, filters?: unknown): { job: 
         // 同 runFetchNew：地址对但结构没识别出来，不能当成"当曲云列表里没这些编号"处理
         throw new Error("未能识别当曲云工单列表页面结构，本次批量更新判定无效");
       }
-      verifyScrapedRowsAgainstCompletedTicket(result.rows);
+      verifyScrapedRowsAgainstCompletedTicket(result.rows, {
+        pageCount: result.pageCount,
+        scrollIncomplete: result.scrollIncomplete,
+      });
       for (const row of result.rows) {
         const code = row["编号"]?.trim();
         if (code) rowsByCode.set(code, row);
