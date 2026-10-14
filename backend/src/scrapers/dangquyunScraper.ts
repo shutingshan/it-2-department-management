@@ -259,6 +259,43 @@ async function extractFromLegacyGrid(
   return rows.length > 0 ? rows : null;
 }
 
+/**
+ * 接口探针：把页面发出的 JSON 响应按"体积从大到小"汇总打印。
+ * 工单列表那个接口的响应体通常是整页里最大的几个之一，据此一眼就能认出来。
+ * 只在 DANGQUYUN_DEBUG=true 时挂载，正式跑不受影响。
+ */
+function attachApiProbe(page: Page): void {
+  const seen: { url: string; size: number; status: number }[] = [];
+  page.on("response", (res) => {
+    const type = res.headers()["content-type"] ?? "";
+    if (!type.includes("json")) return;
+    // 不读 body 本身，只量体积：读 body 会消耗响应流，可能影响页面自身的解析
+    res
+      .body()
+      .then((buf) => {
+        seen.push({ url: res.url(), size: buf.length, status: res.status() });
+      })
+      .catch(() => {});
+  });
+  page.on("close", () => printApiProbe(seen));
+  // 页面不一定触发 close（流程里是直接 browser.close()），所以也挂到进程退出
+  process.once("beforeExit", () => printApiProbe(seen));
+}
+
+let apiProbePrinted = false;
+function printApiProbe(seen: { url: string; size: number; status: number }[]): void {
+  if (apiProbePrinted || seen.length === 0) return;
+  apiProbePrinted = true;
+  const top = [...seen].sort((a, b) => b.size - a.size).slice(0, 12);
+  console.log(`[dangquyun][接口探针] 共捕获 ${seen.length} 个 JSON 响应，按体积排序取前 ${top.length} 个：`);
+  top.forEach((r, i) => {
+    // URL 可能很长且带 token，截断到 160 字符
+    const url = r.url.length > 160 ? `${r.url.slice(0, 160)}…` : r.url;
+    console.log(`  ${String(i + 1).padStart(2)}. ${(r.size / 1024).toFixed(1).padStart(8)} KB  [${r.status}]  ${url}`);
+  });
+  console.log("[dangquyun][接口探针] 体积最大的那个多半就是工单列表接口，把这份清单发回来即可");
+}
+
 // 原生 <table> 结构提取
 async function extractFromNativeTable(target: Locatable): Promise<ScrapedRow[] | null> {
   const table = target.locator("table").first();
@@ -371,6 +408,11 @@ export async function scrapeDangquyunTicketList(
   try {
     const context = await getAuthenticatedContext(browser);
     const page = context.pages()[0] ?? (await context.newPage());
+
+    // DEBUG 模式下记录页面发出的所有 JSON 接口响应，用来定位"工单列表数据是哪个接口返回的"。
+    // 找到之后就能直接截获接口 JSON，不必再跟虚拟网格的横向/纵向虚拟化较劲——
+    // DOM 里一次只渲染 14/200 行、9/25 列，而接口返回的是全量行与全量字段
+    if (config.dangquyun.debug) attachApiProbe(page);
 
     // 登录/跳转流程走完后，最终停留的地址必须是 .env 里配置的 DANGQUYUN_TARGET_URL——
     // 如果因为登录跳转异常、网站改版换了地址等原因跑到了别的网址，后面抓到的数据大概率
