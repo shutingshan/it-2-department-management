@@ -503,9 +503,10 @@ async function extractFromVirtualGrid(
 
   if (headerMismatch > 0) {
     // 列数对不上时可能有字段没采到，必须说清楚，否则会悄悄落一批列名是 col@123 的脏数据
+    const columnCounts = Array.from(new Set(rows.map((r) => Object.keys(r).length))).sort((a, b) => a - b);
     console.warn(
-      `[dangquyun] 有 ${headerMismatch}/${rows.length} 行的列数与表头数（${harvested.headers.length}）不一致，` +
-        "对不上表头的列会退化成 col@横坐标 这类占位列名"
+      `[dangquyun] 有 ${headerMismatch}/${rows.length} 行的列数与表头数（${harvested.headers.length}）不一致` +
+        `（实际每行列数：${columnCounts.join("/")}），对不上表头的列会退化成 col@横坐标 这类占位列名`
     );
   }
   console.log(
@@ -569,12 +570,51 @@ function attachApiProbe(page: Page): void {
       .body()
       .then((buf) => {
         seen.push({ url: res.url(), size: buf.length, status: res.status() });
+        scanForColumnDefinitions(res.url(), buf.toString("utf8"));
       })
       .catch(() => {});
   });
   page.on("close", () => printApiProbe(seen));
   // 页面不一定触发 close（流程里是直接 browser.close()），所以也挂到进程退出
   process.once("beforeExit", () => printApiProbe(seen));
+}
+
+// 工单列表上这些中文列名足够特征化，哪个接口响应里出现了它们，哪个就带着
+// 「字段代号 → 中文列名」的对照表（接口返回的字段名全是 SerialNumber/Bt/Fl 这类代号）
+const HEADER_PROBE_WORDS = ["需求模块", "归属应用", "受理人", "关联TAPD", "预计梳理完成", "编号"];
+const columnDefScanned = new Set<string>();
+
+/** 在响应里找出含中文列名的那些对象并原样打印，用来还原字段代号与列名的对应关系 */
+function scanForColumnDefinitions(url: string, text: string): void {
+  if (!HEADER_PROBE_WORDS.some((word) => text.includes(word))) return;
+  const key = url.split("?")[0];
+  if (columnDefScanned.has(key)) return; // 同一个接口会被调很多次，只看第一次
+  columnDefScanned.add(key);
+  console.log(`[dangquyun][列定义] 这个响应里出现了中文列名：${key}`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    console.log("[dangquyun][列定义] 响应不是合法 JSON，跳过");
+    return;
+  }
+  let printed = 0;
+  const walk = (node: unknown, depth: number) => {
+    if (printed >= 10 || depth > 10 || node === null || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      node.forEach((v) => walk(v, depth + 1));
+      return;
+    }
+    const values = Object.values(node);
+    if (values.some((v) => typeof v === "string" && HEADER_PROBE_WORDS.includes(v))) {
+      // 命中的这一层就是列定义本身，不再往里钻
+      console.log(`    ${JSON.stringify(node).slice(0, 300)}`);
+      printed += 1;
+      return;
+    }
+    values.forEach((v) => walk(v, depth + 1));
+  };
+  walk(parsed, 0);
 }
 
 // 接口探针认出来的工单列表接口（当曲云用聚合 GraphQL 网关，一页一次请求，响应 1MB 上下）
@@ -596,9 +636,18 @@ function attachListApiDump(page: Page): void {
       .text()
       .then((body) => {
         fs.mkdirSync(DEBUG_DIR, { recursive: true });
-        const file = path.join(DEBUG_DIR, `${Date.now()}-list-api-${seq}.json`);
+        const stamp = Date.now();
+        const file = path.join(DEBUG_DIR, `${stamp}-list-api-${seq}.json`);
         fs.writeFileSync(file, body);
         console.log(`[dangquyun][列表接口] 第 ${seq} 份响应已存到 ${file}`);
+        // 请求体里通常写着这一页选了哪些字段，是「字段代号 → 中文列名」最可能的来源
+        const postData = res.request().postData();
+        if (postData) {
+          const requestFile = path.join(DEBUG_DIR, `${stamp}-list-api-${seq}-request.json`);
+          fs.writeFileSync(requestFile, postData);
+          console.log(`[dangquyun][列表接口] 请求体（${postData.length} 字节）已存到 ${requestFile}`);
+          console.log(`[dangquyun][列表接口] 请求体开头 600 字：${postData.slice(0, 600)}`);
+        }
         try {
           describeListApi(JSON.parse(body));
         } catch {
@@ -645,7 +694,7 @@ function describeListApi(parsed: unknown): void {
   );
   const keys = Object.keys(found.items[0]);
   console.log(`[dangquyun][列表接口] 单条记录 ${keys.length} 个字段：`);
-  for (const key of keys.slice(0, 50)) {
+  for (const key of keys.slice(0, 200)) {
     const value = found.items[0][key];
     const preview =
       value === null || value === undefined
@@ -655,7 +704,7 @@ function describeListApi(parsed: unknown): void {
           : String(value).slice(0, 24);
     console.log(`    ${key} = ${preview}`);
   }
-  if (keys.length > 50) console.log(`    …另有 ${keys.length - 50} 个字段未列出`);
+  if (keys.length > 200) console.log(`    …另有 ${keys.length - 200} 个字段未列出`);
 }
 
 let apiProbePrinted = false;
