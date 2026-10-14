@@ -211,6 +211,13 @@ interface HarvestResult {
   headers: GridHeader[];
   /** 纵向是不是真的滚到了底。false 表示本页可能没采全 */
   reachedBottom: boolean;
+  /** 采集方式的自检信息，采不全时用来定位是哪一环没生效 */
+  diagnostics: {
+    vScroller: string;
+    hScroller: string;
+    scrollMode: string;
+    columnIdUsable: boolean;
+  };
 }
 
 /**
@@ -237,8 +244,10 @@ async function harvestVirtualGrid(
       const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
       const deadline = Date.now() + timeoutMs;
 
-      // 往上找真正带滚动条的祖先元素。网格的横向/纵向滚动容器不一定是同一个
+      // 往上找真正能滚动的祖先元素。先认 overflow 是 auto/scroll 的，
+      // 找不到再退一步认"内容比可视区大"的——有的虚拟表格外层写的是 overflow:hidden
       const findScroller = (start: Element | null, axis: "x" | "y"): HTMLElement | null => {
+        let fallback: HTMLElement | null = null;
         let el = start as HTMLElement | null;
         while (el && el !== document.body) {
           const style = getComputedStyle(el);
@@ -247,21 +256,28 @@ async function harvestVirtualGrid(
             axis === "y"
               ? el.scrollHeight > el.clientHeight + 4
               : el.scrollWidth > el.clientWidth + 4;
-          if ((overflow === "auto" || overflow === "scroll") && overflowing) return el;
+          if (overflowing) {
+            if (overflow === "auto" || overflow === "scroll") return el;
+            if (!fallback) fallback = el;
+          }
           el = el.parentElement;
         }
-        return null;
+        return fallback;
       };
 
       const firstCell = document.querySelector(cellSelector);
       if (!firstCell) return null;
       const vScroller = findScroller(firstCell, "y");
       const hScroller = findScroller(firstCell, "x");
+      // 外层 overflow:hidden、靠监听 wheel 自己平移内容的表格，设 scrollTop 是推不动的，
+      // 得往元素上派发 wheel 事件。用哪种方式不预先判断，实际试一次看推没推动
+      const wheelTarget = ((firstCell as HTMLElement).parentElement ?? document.body) as HTMLElement;
+      const mode: { x: "scroll" | "wheel" | null; y: "scroll" | "wheel" | null } = { x: null, y: null };
 
-      // 左侧冻结列不随横向滚动移动，它的屏幕坐标本身就是稳定的列坐标；
-      // 普通列的屏幕坐标会随 scrollLeft 变，要加回 scrollLeft 才能跨屏对齐成同一个值。
-      // 哪些是冻结列不靠 class 猜，靠实测：同一列在两个不同 scrollLeft 下屏幕坐标没变的就是。
-      // 冻结与否要等整轮采完才能判定，所以这里只记录原始样本，最后再统一换算。
+      // 冻结列不随横向滚动移动，它的屏幕坐标本身就是稳定的列坐标；普通列的屏幕坐标会随
+      // scrollLeft 变，要加回 scrollLeft 才能跨屏对齐成同一个值。哪些是冻结列不靠 class 猜，
+      // 靠实测：同一列在两个不同 scrollLeft 下屏幕坐标没变的就是。冻结与否要等整轮采完才能
+      // 判定，所以这里只记录原始样本，最后再统一换算
       interface XSample {
         minScrollLeft: number;
         xAtMin: number;
@@ -283,20 +299,21 @@ async function harvestVirtualGrid(
           prev.xAtMax = x;
         }
       };
-      const resolveX = (sample: XSample): number => {
+      const resolveX = (sample: XSample | undefined): number => {
+        if (!sample) return 0;
         const moved = sample.maxScrollLeft > sample.minScrollLeft;
         const frozen = moved && Math.abs(sample.xAtMax - sample.xAtMin) < 2;
         return frozen ? sample.xAtMin : sample.xAtMin + sample.minScrollLeft;
       };
 
-      // 表头的列 id 不一定挂在文字节点本身上，往上找几层
-      const attrFromSelfOrAncestor = (start: Element, names: string[]): string => {
-        let el: Element | null = start;
-        for (let depth = 0; el && depth < 6; depth++, el = el.parentElement) {
-          for (const name of names) {
-            const value = el.getAttribute(name);
-            if (value) return value;
-          }
+      // 列 id 只从表头元素自身或它最近的表头容器上取。不能顺着祖先一路往上找——
+      // 再往上就是整个表头行的公共容器，25 个表头会全部拿到同一个 id collapse 成一列
+      const columnIdOf = (el: Element): string => {
+        const wrapper = el.closest('[class*="columnItemHeaderTitle"]');
+        for (const node of [el, wrapper]) {
+          if (!node) continue;
+          const value = node.getAttribute("data-nodeid") || node.getAttribute("_nk");
+          if (value) return value;
         }
         return "";
       };
@@ -304,7 +321,8 @@ async function harvestVirtualGrid(
       const cellX = new Map<string, XSample>();
       const headerX = new Map<string, XSample>();
       const cellData = new Map<string, { rowKey: string; colKey: string; nodeId: string; top: number; text: string }>();
-      const headerText = new Map<string, string>();
+      // 表头按文字去重：文字天然一列一个，比列 id 稳妥
+      const headerColumnId = new Map<string, string>();
 
       const snapshot = () => {
         const scrollLeft = hScroller ? hScroller.scrollLeft : 0;
@@ -333,72 +351,131 @@ async function harvestVirtualGrid(
           if (!text) return;
           const rect = (el.closest('[class*="columnItemHeaderTitle"]') ?? el).getBoundingClientRect();
           if (rect.width === 0 && rect.height === 0) return;
-          const key = attrFromSelfOrAncestor(el, ["data-nodeid", "_nk"]) || `x${Math.round(rect.left + scrollLeft)}`;
-          sampleX(headerX, key, rect.left, scrollLeft);
-          headerText.set(key, text);
+          sampleX(headerX, text, rect.left, scrollLeft);
+          if (!headerColumnId.get(text)) headerColumnId.set(text, columnIdOf(el));
         });
       };
 
-      // 纵向逐屏滚到底，每屏采一次。留一行左右的重叠，避免正好卡在交界的行两边都没采到
-      const sweepVertically = (): Promise<boolean> => {
-        if (!vScroller) {
-          snapshot();
-          return Promise.resolve(true);
-        }
-        const step = Math.max(40, vScroller.clientHeight - 80);
-        return (async () => {
-          vScroller.scrollTop = 0;
-          await sleep(settleMs);
-          snapshot();
-          for (let guard = 0; guard < 500; guard++) {
-            if (Date.now() > deadline) return false;
-            if (vScroller.scrollTop + vScroller.clientHeight >= vScroller.scrollHeight - 2) return true;
-            const before = vScroller.scrollTop;
-            vScroller.scrollTop = before + step;
-            await sleep(settleMs);
-            snapshot();
-            if (vScroller.scrollTop <= before) return true; // 已经滚不动了
-          }
-          return false;
-        })();
+      const posOf = (axis: "x" | "y"): number => {
+        const scroller = axis === "y" ? vScroller : hScroller;
+        if (!scroller) return 0;
+        return axis === "y" ? scroller.scrollTop : scroller.scrollLeft;
       };
 
-      let reachedBottom = true;
-      if (!hScroller) {
-        reachedBottom = await sweepVertically();
-      } else {
-        const maxLeft = hScroller.scrollWidth - hScroller.clientWidth;
-        // 同样留一点重叠，避免正好卡在交界的列两边都没采到
-        const step = Math.max(80, hScroller.clientWidth - 80);
-        const stops: number[] = [];
-        for (let x = 0; x < maxLeft; x += step) stops.push(x);
-        stops.push(maxLeft);
-        for (const x of stops) {
-          if (Date.now() > deadline) {
-            reachedBottom = false;
-            break;
-          }
-          hScroller.scrollLeft = x;
+      // 往某个方向推一屏。先试 scrollTop/scrollLeft，推不动再派发 wheel；
+      // 哪种有效记在 mode 里，后面直接用，不再每次都试
+      const advance = async (axis: "x" | "y", amount: number) => {
+        const scroller = axis === "y" ? vScroller : hScroller;
+        if (scroller && mode[axis] !== "wheel") {
+          const before = posOf(axis);
+          if (axis === "y") scroller.scrollTop = before + amount;
+          else scroller.scrollLeft = before + amount;
           await sleep(settleMs);
-          if (!(await sweepVertically())) reachedBottom = false;
+          if (posOf(axis) !== before) {
+            mode[axis] = "scroll";
+            snapshot();
+            return;
+          }
         }
-        hScroller.scrollLeft = 0;
+        wheelTarget.dispatchEvent(
+          new WheelEvent("wheel", {
+            deltaY: axis === "y" ? amount : 0,
+            deltaX: axis === "x" ? amount : 0,
+            bubbles: true,
+            cancelable: true,
+          })
+        );
+        if (mode[axis] !== "scroll") mode[axis] = "wheel";
+        await sleep(settleMs);
+        snapshot();
+      };
+
+      // 回到起点。wheel 模式下没有可写的 scrollTop，只能反向多推几把
+      const resetAxis = async (axis: "x" | "y") => {
+        const scroller = axis === "y" ? vScroller : hScroller;
+        if (scroller) {
+          if (axis === "y") scroller.scrollTop = 0;
+          else scroller.scrollLeft = 0;
+        }
+        if (mode[axis] === "wheel") {
+          for (let i = 0; i < 40; i++) {
+            wheelTarget.dispatchEvent(
+              new WheelEvent("wheel", {
+                deltaY: axis === "y" ? -2000 : 0,
+                deltaX: axis === "x" ? -2000 : 0,
+                bubbles: true,
+                cancelable: true,
+              })
+            );
+          }
+        }
+        await sleep(settleMs);
+      };
+
+      // 采集是"推进式"而不是"按滚动条几何算步数"的：每推一屏看累加表有没有长出新东西，
+      // 连续几屏没有新内容才算到头。这样不管表格是真滚动条还是 wheel 平移都能收敛
+      const vStep = () => (vScroller ? Math.max(40, vScroller.clientHeight - 80) : 400);
+      const hStep = () => (hScroller ? Math.max(80, hScroller.clientWidth - 80) : 400);
+
+      let reachedBottom = true;
+      await resetAxis("x");
+      for (let hRound = 0; hRound < 40; hRound++) {
+        await resetAxis("y");
+        snapshot();
+
+        let settled = false;
+        let stagnant = 0;
+        for (let guard = 0; guard < 400; guard++) {
+          if (Date.now() > deadline) break;
+          const before = cellData.size;
+          await advance("y", vStep());
+          if (cellData.size === before) {
+            stagnant += 1;
+            if (stagnant >= 3) {
+              settled = true;
+              break;
+            }
+          } else {
+            stagnant = 0;
+          }
+        }
+        if (!settled) reachedBottom = false;
+
+        if (Date.now() > deadline) break;
+        // 横向到头了就结束；推一屏还没发现新列也结束
+        if (hScroller && mode.x !== "wheel" && hScroller.scrollLeft + hScroller.clientWidth >= hScroller.scrollWidth - 2) break;
+        const beforeColumns = cellX.size;
+        await advance("x", hStep());
+        if (cellX.size === beforeColumns) break;
       }
 
       const cells = Array.from(cellData.values()).map((c) => ({
         rowKey: c.rowKey,
         nodeId: c.nodeId,
-        left: resolveX(cellX.get(c.colKey)!),
+        left: resolveX(cellX.get(c.colKey)),
         top: c.top,
         text: c.text,
       }));
-      const headers = Array.from(headerText.entries()).map(([key, text]) => ({
-        // 占位 key（x123）是坐标不是列 id，不能拿去跟单元格的 data-nodeid 匹配
-        key: key.startsWith("x") && !Number.isNaN(Number(key.slice(1))) ? "" : key,
-        left: resolveX(headerX.get(key)!),
+      // 列 id 只有在"每个表头各不相同"时才可信。取不到（或取到的是公共容器 id，
+      // 25 个表头全一样）就整体弃用，退回按横坐标对齐
+      const ids = Array.from(headerColumnId.values());
+      const idsUsable = ids.every((v) => v) && new Set(ids).size === ids.length;
+      const headers = Array.from(headerColumnId.entries()).map(([text, id]) => ({
+        key: idsUsable ? id : "",
+        left: resolveX(headerX.get(text)),
         text,
       }));
-      return { cells, headers, reachedBottom };
+      return {
+        cells,
+        headers,
+        reachedBottom,
+        diagnostics: {
+          vScroller: vScroller ? `${vScroller.className || vScroller.tagName}` : "未找到",
+          hScroller: hScroller ? `${hScroller.className || hScroller.tagName}` : "未找到",
+          scrollMode: `纵向=${mode.y ?? "未动"} 横向=${mode.x ?? "未动"}`,
+          columnIdUsable: idsUsable,
+        },
+      };
     },
     { cellSelector, headerSelector: HEADER_SELECTOR, settleMs: GRID_SETTLE_MS, timeoutMs: GRID_HARVEST_TIMEOUT_MS }
   );
@@ -431,7 +508,11 @@ async function extractFromVirtualGrid(
         "对不上表头的列会退化成 col@横坐标 这类占位列名"
     );
   }
-  console.log(`[dangquyun] 本页采集完成：${rows.length} 行 × ${harvested.headers.length} 列表头`);
+  console.log(
+    `[dangquyun] 本页采集完成：${rows.length} 行 × ${harvested.headers.length} 列表头` +
+      `（滚动容器 纵=${harvested.diagnostics.vScroller} 横=${harvested.diagnostics.hScroller}；` +
+      `${harvested.diagnostics.scrollMode}；列id可用=${harvested.diagnostics.columnIdUsable}）`
+  );
   return rows;
 }
 
@@ -494,6 +575,87 @@ function attachApiProbe(page: Page): void {
   page.on("close", () => printApiProbe(seen));
   // 页面不一定触发 close（流程里是直接 browser.close()），所以也挂到进程退出
   process.once("beforeExit", () => printApiProbe(seen));
+}
+
+// 接口探针认出来的工单列表接口（当曲云用聚合 GraphQL 网关，一页一次请求，响应 1MB 上下）
+const LIST_API_PATTERN = /\/aggregatedata\/GraphQL\/page\/execute/i;
+
+/**
+ * DEBUG 模式下把列表接口的响应存盘并打印结构摘要。
+ * DOM 那条路要跟双向虚拟化死磕，接口返回的却是整页全量行全量字段——
+ * 摸清结构之后直接截获接口就能一步到位，这里先把结构摸出来。
+ */
+function attachListApiDump(page: Page): void {
+  let index = 0;
+  page.on("response", (res) => {
+    if (!LIST_API_PATTERN.test(res.url())) return;
+    if (!(res.headers()["content-type"] ?? "").includes("json")) return;
+    const seq = ++index;
+    if (seq > 2) return; // 存两份足够看结构，存多了白白占磁盘
+    res
+      .text()
+      .then((body) => {
+        fs.mkdirSync(DEBUG_DIR, { recursive: true });
+        const file = path.join(DEBUG_DIR, `${Date.now()}-list-api-${seq}.json`);
+        fs.writeFileSync(file, body);
+        console.log(`[dangquyun][列表接口] 第 ${seq} 份响应已存到 ${file}`);
+        try {
+          describeListApi(JSON.parse(body));
+        } catch {
+          console.log("[dangquyun][列表接口] 响应不是合法 JSON，跳过结构分析");
+        }
+      })
+      .catch(() => {});
+  });
+}
+
+/** 在任意深度的 JSON 里找出"最长的那个对象数组"，工单列表几乎必然是它 */
+function findLargestObjectArray(root: unknown): { path: string; items: Record<string, unknown>[] } | null {
+  let best: { path: string; items: Record<string, unknown>[] } | null = null;
+  const walk = (node: unknown, nodePath: string, depth: number) => {
+    if (depth > 8 || node === null || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      const objects = node.filter(
+        (v) => v !== null && typeof v === "object" && !Array.isArray(v)
+      ) as Record<string, unknown>[];
+      if (objects.length > 0 && (!best || objects.length > best.items.length)) {
+        best = { path: nodePath, items: objects };
+      }
+      // 只往前几个元素里钻，同构数组看一个就够，否则深层嵌套的大响应会扫很久
+      node.slice(0, 3).forEach((v, i) => walk(v, `${nodePath}[${i}]`, depth + 1));
+      return;
+    }
+    for (const [key, value] of Object.entries(node)) {
+      walk(value, nodePath ? `${nodePath}.${key}` : key, depth + 1);
+    }
+  };
+  walk(root, "", 0);
+  return best;
+}
+
+/** 打印列表接口的结构摘要：数组在哪、多少条、单条有哪些字段。值一律截断，避免刷屏 */
+function describeListApi(parsed: unknown): void {
+  const found = findLargestObjectArray(parsed);
+  if (!found) {
+    console.log("[dangquyun][列表接口] 响应里没找到对象数组，结构可能不是预期的那种");
+    return;
+  }
+  console.log(
+    `[dangquyun][列表接口] 最大的对象数组在 ${found.path || "<根>"}，共 ${found.items.length} 条记录`
+  );
+  const keys = Object.keys(found.items[0]);
+  console.log(`[dangquyun][列表接口] 单条记录 ${keys.length} 个字段：`);
+  for (const key of keys.slice(0, 50)) {
+    const value = found.items[0][key];
+    const preview =
+      value === null || value === undefined
+        ? String(value)
+        : typeof value === "object"
+          ? `${Array.isArray(value) ? "数组" : "对象"} ${JSON.stringify(value).slice(0, 50)}…`
+          : String(value).slice(0, 24);
+    console.log(`    ${key} = ${preview}`);
+  }
+  if (keys.length > 50) console.log(`    …另有 ${keys.length - 50} 个字段未列出`);
 }
 
 let apiProbePrinted = false;
@@ -626,7 +788,10 @@ export async function scrapeDangquyunTicketList(
     // DEBUG 模式下记录页面发出的所有 JSON 接口响应，用来定位"工单列表数据是哪个接口返回的"。
     // 找到之后就能直接截获接口 JSON，不必再跟虚拟网格的横向/纵向虚拟化较劲——
     // DOM 里一次只渲染 14/200 行、9/25 列，而接口返回的是全量行与全量字段
-    if (config.dangquyun.debug) attachApiProbe(page);
+    if (config.dangquyun.debug) {
+      attachApiProbe(page);
+      attachListApiDump(page);
+    }
 
     // 登录/跳转流程走完后，最终停留的地址必须是 .env 里配置的 DANGQUYUN_TARGET_URL——
     // 如果因为登录跳转异常、网站改版换了地址等原因跑到了别的网址，后面抓到的数据大概率
