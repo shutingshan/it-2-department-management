@@ -11,7 +11,7 @@ export interface ScrapedRow {
   [columnHeader: string]: string;
 }
 
-export type ExtractStrategy = "dangqu-grid" | "native-table" | "aria-grid";
+export type ExtractStrategy = "dangqu-virtual-grid" | "dangqu-grid" | "native-table" | "aria-grid";
 
 export interface ScrapeResult {
   rows: ScrapedRow[];
@@ -100,10 +100,130 @@ async function scrollGridToLoadAll(
   return { count: lastCount, stabilized: stableRounds >= 3 };
 }
 
-// 当曲云（lumi 自研表格组件）的实际结构：既不是原生 table，也没有标准 ARIA role，
-// 而是每一行用 data-row-item="true" 标记、每个单元格用 data-columnitem 标记；
-// class 名带编译哈希（如 columnItemHeaderTitle___3CMa-）会变，属性选择器更稳定
-async function extractFromDangquyunGrid(
+// 表头文字。class 带编译哈希（columnItemHeaderTitle___3CMa-），用 class*= 前缀匹配
+const HEADER_SELECTOR = '[class*="columnItemHeaderTitle"] [class*="titleSpanTitle"]';
+
+// 勾选框/序号这类非数据列，不参与表头对齐
+function isUiOnlyColumn(nodeId: string): boolean {
+  return nodeId.includes("selection") || nodeId.includes("serial");
+}
+
+/** 从页面上取回来的单元格原始信息（见 extractFromVirtualGrid 的 evaluateAll） */
+export interface GridCell {
+  rowKey: string;
+  nodeId: string;
+  left: number;
+  top: number;
+  text: string;
+}
+
+/**
+ * 把扁平的单元格还原成行：按 rowKey 分组、行间按 top 排序、行内按 left 排成列，再跟表头对齐。
+ * 抽成纯函数是为了不起浏览器也能验证这段最容易出错的逻辑。
+ */
+export function buildRowsFromGridCells(
+  cells: GridCell[],
+  headers: string[]
+): { rows: ScrapedRow[]; headerMismatch: number } {
+  const byRow = new Map<string, GridCell[]>();
+  for (const cell of cells) {
+    if (!cell.rowKey || isUiOnlyColumn(cell.nodeId)) continue;
+    const list = byRow.get(cell.rowKey);
+    if (list) list.push(cell);
+    else byRow.set(cell.rowKey, [cell]);
+  }
+
+  const rows: ScrapedRow[] = [];
+  let headerMismatch = 0;
+  // 行间顺序按 top；同一行的单元格 top 相同，取第一个即可
+  const ordered = Array.from(byRow.values()).sort((a, b) => a[0].top - b[0].top);
+  for (const rowCells of ordered) {
+    // 固定列与滚动列可能分属两个容器、left 各自从 0 起算，同一行里会出现重复 left；
+    // 先按 nodeId 去重，保证一列只取一个单元格
+    // 必须单次遍历去重：filter + map 两段写法里 filter 会先整轮跑完，
+    // 那时 seen 还是空的，等于没去重
+    const seen = new Set<string>();
+    const sorted: GridCell[] = [];
+    for (const cell of rowCells) {
+      if (cell.nodeId) {
+        if (seen.has(cell.nodeId)) continue;
+        seen.add(cell.nodeId);
+      }
+      sorted.push(cell);
+    }
+    sorted.sort((a, b) => a.left - b.left);
+    if (sorted.length === 0) continue;
+    if (headers.length > 0 && sorted.length !== headers.length) headerMismatch += 1;
+
+    const row: ScrapedRow = {};
+    sorted.forEach((c, idx) => {
+      row[headers[idx] || `col${idx}`] = c.text;
+    });
+    rows.push(row);
+  }
+  return { rows, headerMismatch };
+}
+
+/**
+ * 当曲云新版表格（lumi 虚拟网格）：DOM 里**没有行元素**。
+ * 每个单元格都是扁平的绝对定位 div，靠属性标明归属：
+ *   data-gridrowkey="<行id>"   同一行的单元格共用
+ *   data-nodeid="<列id>"       列标识；勾选列是 lumi_table_selection_key
+ *   style.left                 决定它在第几列（视觉顺序）
+ *   style.top                  决定它在第几行（视觉顺序）
+ *
+ * 所以这里按 gridrowkey 分组成行、按 left 排成列，再跟表头按序对齐。
+ * 旧版那套 data-row-item / data-columnitem 的嵌套结构见 extractFromLegacyGrid。
+ */
+async function extractFromVirtualGrid(
+  target: Locatable,
+  stat?: ScrollStat
+): Promise<ScrapedRow[] | null> {
+  const cellSelector = "[data-gridrowkey]";
+  if ((await target.locator(cellSelector).count()) === 0) return null;
+
+  // 虚拟滚动：一页 200 条但 DOM 只渲染视口内的十几行，必须滚到底部把本页全部加载出来
+  const scrolled = await scrollGridToLoadAll(target, cellSelector);
+  if (!scrolled.stabilized && stat) {
+    stat.incomplete = true;
+    console.warn(
+      `[dangquyun] 本页滚动加载超时，已渲染 ${scrolled.count} 个单元格但未确认是否已全部加载，本次抓取结果可能不完整`
+    );
+  }
+
+  // 一次性把所有单元格的归属与位置取回来，避免逐个 locator 往返（一页上千个单元格会非常慢）
+  const cells = await target.locator(cellSelector).evaluateAll((els) =>
+    els.map((el) => {
+      const h = el as HTMLElement;
+      return {
+        rowKey: h.getAttribute("data-gridrowkey") ?? "",
+        nodeId: h.getAttribute("data-nodeid") ?? "",
+        left: Number.parseFloat(h.style.left || "0") || 0,
+        top: Number.parseFloat(h.style.top || "0") || 0,
+        text: (h.innerText || h.textContent || "").trim(),
+      };
+    })
+  );
+  if (cells.length === 0) return null;
+
+  const headers = (await target.locator(HEADER_SELECTOR).allTextContents()).map((h) => h.trim());
+
+  const { rows, headerMismatch } = buildRowsFromGridCells(cells, headers);
+  if (rows.length === 0) return null;
+
+  if (headerMismatch > 0) {
+    // 列数对不上时字段会错位，必须说清楚，否则会悄悄落一批列名是 col3/col4 的脏数据
+    console.warn(
+      `[dangquyun] 有 ${headerMismatch}/${rows.length} 行的单元格数与表头数（${headers.length}）不一致，` +
+        "对应列会退化成 col0/col1 这类占位列名，字段映射可能错位"
+    );
+  }
+  return rows.length > 0 ? rows : null;
+}
+
+// 当曲云旧版表格结构：每一行用 data-row-item="true" 标记、每个单元格用 data-columnitem 标记。
+// 2026-10 改版后已不再出现，保留作为兜底，万一不同租户/版本还在用老结构
+async function extractFromLegacyGrid(
   target: Locatable,
   stat?: ScrollStat
 ): Promise<ScrapedRow[] | null> {
@@ -123,7 +243,7 @@ async function extractFromDangquyunGrid(
     );
   }
 
-  const headers = await target.locator('[class*="columnItemHeaderTitle"] [class*="titleSpanTitle"]').allTextContents();
+  const headers = await target.locator(HEADER_SELECTOR).allTextContents();
 
   const rows: ScrapedRow[] = [];
   for (let i = 0; i < rowCount; i++) {
@@ -191,7 +311,11 @@ async function extractCurrentPage(
   stat?: ScrollStat
 ): Promise<{ rows: ScrapedRow[]; strategy: ExtractStrategy } | null> {
   for (const target of targets) {
-    const rows = await extractFromDangquyunGrid(target, stat).catch(() => null);
+    const rows = await extractFromVirtualGrid(target, stat).catch(() => null);
+    if (rows) return { rows, strategy: "dangqu-virtual-grid" };
+  }
+  for (const target of targets) {
+    const rows = await extractFromLegacyGrid(target, stat).catch(() => null);
     if (rows) return { rows, strategy: "dangqu-grid" };
   }
   for (const target of targets) {
@@ -286,6 +410,20 @@ export async function scrapeDangquyunTicketList(
         } catch {
           // 跨域 iframe 等场景可能拿不到内容，跳过
         }
+      }
+      // 把各选择器的命中数打出来，一眼能看出是行、单元格还是表头的选择器失效了，
+      // 不用再去 .auth/debug 里手工 grep HTML
+      for (const t of targets) {
+        const probe = await Promise.all(
+          [
+            ["新版单元格 [data-gridrowkey]", "[data-gridrowkey]"],
+            ["旧版行 [data-row-item]", '[data-row-item="true"]'],
+            ["旧版单元格 [data-columnitem]", "[data-columnitem]"],
+            ["表头", HEADER_SELECTOR],
+            ["原生 table", "table"],
+          ].map(async ([label, sel]) => `${label}=${await t.locator(sel).count().catch(() => -1)}`)
+        );
+        console.warn(`[dangquyun] 选择器命中数：${probe.join("  ")}`);
       }
       console.warn(
         `[dangquyun] 未能用通用规则识别出表格结构（${childFrameCount > 0 ? `含 ${childFrameCount} 个子 iframe` : "页面本身没有子 iframe"}），` +
